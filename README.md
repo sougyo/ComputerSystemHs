@@ -167,25 +167,24 @@ cabal run computersystem
 
 ### WASM ビルド (ブラウザ実行)
 
-**Step 1: GHC WASM バックエンドをインストール**
-
 ```bash
-curl https://gitlab.haskell.org/haskell-wasm/ghc-wasm-meta/raw/master/bootstrap.sh | sh
+# 1. GHC WASM バックエンドをインストール (数分かかります)
+make install-wasm-ghc
+
+# 2. 環境変数を読み込む (毎セッションで必要、または ~/.bashrc に追記)
 source ~/.ghc-wasm/env
-```
 
-**Step 2: WASM ファイルをビルド**
-
-```bash
+# 3. WASM ビルド
 make wasm
-# → web/computersystem.wasm が生成される
+
+# 4. ブラウザで確認
+make serve   # → http://localhost:8080
 ```
 
-**Step 3: 開発サーバーを起動**
+毎回 `source` しなくて済むようにするには:
 
 ```bash
-make serve
-# → http://localhost:8080 を開く
+echo 'source ~/.ghc-wasm/env' >> ~/.bashrc
 ```
 
 ---
@@ -196,12 +195,31 @@ Haskell 側でエクスポートする関数:
 
 | 関数名 | シグネチャ | 説明 |
 |--------|-----------|------|
+| `hs_init`       | `(i32, i32) → ()` | GHC RTS 初期化 (JS から明示的に呼ぶ) |
 | `hs_get_layout` | `() → CString` | CPU レイアウト JSON (初期化時に1度) |
 | `hs_get_state`  | `() → CString` | 現在の CPU ステート JSON |
 | `hs_get_wires`  | `() → CString` | 全ワイヤ値 JSON (レンダリング用) |
 | `hs_step`       | `() → ()` | 1 命令実行 |
 | `hs_reset`      | `() → ()` | CPU リセット |
 | `hs_load_asm`   | `CString → ()` | アセンブリソースをロード |
+
+### WASM 初期化の仕組み
+
+GHC WASM バックエンドには 2 つのビルドモードがある:
+
+| モード | エントリ | RTS の動作 |
+|--------|---------|-----------|
+| コマンド (デフォルト) | `_start()` | `hs_main` → `hs_exit()` → `proc_exit(0)` の順で RTS が**終了**する |
+| `-no-hs-main` + C スタブ | `_start()` | C の `main()` (return 0) を呼ぶだけ。`hs_exit()` は呼ばれない |
+
+このプロジェクトは **`-no-hs-main` モード** でビルドしている。  
+`_start()` 完了後に JS 側から `hs_init(0, 0)` を呼ぶと GHC RTS が初期化され、以降の `hs_*` 関数が使用可能になる。
+
+```
+_start()      ← C ランタイム初期化のみ (hs_exit なし)
+hs_init(0,0)  ← GHC RTS を明示的に初期化
+hs_get_layout / hs_step / ...  ← 正常に動作
+```
 
 JS からの呼び出し例:
 

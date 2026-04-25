@@ -118,15 +118,14 @@
             <p>ビルド方法:</p>
             <pre style="font-size:11px;background:#1a1a1a;padding:8px;border-radius:4px">
 # GHC WASM のインストール
-curl https://gitlab.haskell.org/haskell-wasm/ghc-wasm-meta/raw/master/bootstrap.sh | sh
+make install-wasm-ghc
 source ~/.ghc-wasm/env
 
-# WASMビルド
-wasm32-wasi-ghc -isrc src/Main.hs \
-  -o web/computersystem.wasm
+# WASM ビルド
+make wasm
 
 # サーバー起動
-python3 -m http.server 8080 -d web</pre>
+make serve   # → http://localhost:8080</pre>
             <button onclick="document.getElementById('helpOverlay').style.display='none'">閉じる</button>
         </div>
     </div>
