@@ -162,14 +162,27 @@ const HaskellCPU = (() => {
         inst   = result.instance;
         memory = inst.exports.memory;
 
-        // _start() で GHC ランタイムを初期化し main を実行する。
-        // main 終了時に proc_exit が呼ばれ ExitSignal が飛ぶ。
-        // これをキャッチして続行する — WASM メモリ上の Haskell 状態は保たれる。
-        try {
-            inst.exports._start();
-        } catch (e) {
-            if (!(e instanceof ExitSignal)) throw e;
-            console.log(`[Haskell] _start 完了 (exit code: ${e.exitCode})`);
+        // ビルド方式: -no-hs-main + src/wasm_stub.c
+        //
+        // _start() は C の main() (return 0) を呼ぶだけで GHC hs_main を
+        // 経由しないため hs_exit() が呼ばれず、proc_exit も来ない。
+        // _start() 完了後に hs_init(0,0) を呼ぶと GHC RTS が初期化され、
+        // 以降の hs_* エクスポートが正常に動作する。
+        if (typeof inst.exports._start === 'function') {
+            try {
+                inst.exports._start();
+            } catch (e) {
+                if (!(e instanceof ExitSignal)) throw e;
+                console.log(`[Haskell] _start ExitSignal (exit code: ${e.exitCode})`);
+            }
+        }
+
+        // GHC RTS を明示的に初期化する
+        if (typeof inst.exports.hs_init === 'function') {
+            inst.exports.hs_init(0, 0);
+            console.log('[Haskell] hs_init 完了 (RTS running)');
+        } else {
+            throw new Error('WASM: hs_init が見つかりません。make wasm でリビルドしてください。');
         }
 
         return true;

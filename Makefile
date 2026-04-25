@@ -1,6 +1,7 @@
 GHC       := ghc
 WASM_GHC  := wasm32-wasi-ghc
 SRC       := src/Main.hs
+WASM_SRC  := src/MainWasm.hs
 SRCS      := $(wildcard src/*.hs src/CPU/*.hs)
 OUTDIR    := web
 WASM_OUT  := $(OUTDIR)/computersystem.wasm
@@ -39,9 +40,12 @@ wasm:
 
 .PHONY: _wasm_build
 _wasm_build: $(SRCS)
-	$(WASM_GHC) --make -isrc $(SRC) \
+	$(WASM_GHC) --make -isrc $(WASM_SRC) \
+	  -no-hs-main \
+	  src/wasm_stub.c \
 	  -o $(WASM_OUT) \
 	  -O2 \
+	  -optl-Wl,--export=hs_init \
 	  -optl-Wl,--export=hs_get_layout \
 	  -optl-Wl,--export=hs_get_state \
 	  -optl-Wl,--export=hs_get_wires \
