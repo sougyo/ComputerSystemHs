@@ -89,9 +89,10 @@ class Renderer {
         const cy = absY + comp.y;
         const z  = this.zoom;
 
-        // ズームに応じて表示を切り替え
-        const shouldExpand = z >= comp.expandAt && comp.expandAt > 0
-                          || comp.expandAt === 0;
+        // コンポーネントのスクリーン幅が expandAt(px) 以上になったら展開
+        // expandAt=0 は常に展開
+        const screenW = comp.w * z;
+        const shouldExpand = comp.expandAt === 0 || screenW >= comp.expandAt;
 
         // コンポーネントの輪郭
         ctx.strokeStyle = comp.color || '#4a9eff';
@@ -143,17 +144,18 @@ class Renderer {
         const gx = baseX + gate.x;
         const gy = baseY + gate.y;
         const val = this.wires[gate.out] || 0;
-        ctx.fillStyle = val ? '#00ff88' : '#1a2a1a';
-        ctx.strokeStyle = '#4a9eff';
-        ctx.lineWidth = 0.5 / z;
+        ctx.fillStyle = val ? '#00ff88' : '#1e3828';
+        ctx.strokeStyle = val ? '#00ff88' : '#4a9eff';
+        ctx.lineWidth = 1 / z;
         ctx.beginPath();
         ctx.rect(gx, gy, gate.w, gate.h);
         ctx.fill();
         ctx.stroke();
 
-        if (z >= 6) {
-            ctx.fillStyle = '#fff';
-            ctx.font = `${Math.min(gate.h * 0.6, 3 / z)}px monospace`;
+        const fontSize = gate.h * 0.6;
+        if (fontSize * z >= 6) {
+            ctx.fillStyle = val ? '#003300' : '#dfe6e9';
+            ctx.font = `${fontSize}px monospace`;
             ctx.textAlign = 'center';
             ctx.fillText(gate.type, gx + gate.w/2, gy + gate.h * 0.65);
             ctx.textAlign = 'left';
