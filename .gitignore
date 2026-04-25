@@ -1,0 +1,46 @@
+# ── GHC ビルド成果物 ──────────────────────────
+*.o
+*.hi
+*.dyn_o
+*.dyn_hi
+*.p_o
+*.hie
+
+# GHC プロファイリング
+*.prof
+*.hp
+*.eventlog
+
+# スタブファイル
+*_stub.h
+*_stub.c
+
+# ── cabal ────────────────────────────────────
+dist/
+dist-newstyle/
+.cabal-sandbox/
+cabal.sandbox.config
+cabal.project.local
+cabal.project.local~
+.ghc.environment.*
+
+# ── Stack ────────────────────────────────────
+.stack-work/
+stack.yaml.lock
+
+# ── WASM ビルド成果物 ─────────────────────────
+web/computersystem.wasm
+web/computersystem.wasm.map
+
+# ── ネイティブバイナリ ────────────────────────
+cputest
+/tmp/cputest
+
+# ── エディタ・OS ──────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/

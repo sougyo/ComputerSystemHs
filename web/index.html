@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPU Visualizer (Haskell + WASM)</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        #wasmNotice {
+            display: none;
+            position: fixed;
+            top: 60px; left: 50%;
+            transform: translateX(-50%);
+            background: #2d3436cc;
+            border: 1px solid #fdcb6e;
+            color: #fdcb6e;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 13px;
+            z-index: 100;
+        }
+        .prog-line { font-family: monospace; font-size: 11px; color: #aaa; padding: 1px 0; }
+        .addr { color: #74b9ff; margin-right: 8px; }
+        .mem-row { font-family: monospace; font-size: 10px; color: #aaa; }
+        .mem-addr { color: #74b9ff; }
+        .flag.active { color: #00cec9 !important; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <canvas id="mainCanvas"></canvas>
+
+    <div id="wasmNotice">
+        ⚠ WASM 未ロード: <code>make wasm</code> でビルドしてください
+    </div>
+
+    <!-- 左サイドバー -->
+    <div id="sidebar" class="panel">
+        <h2>CPU State <small style="color:#636e72;font-size:11px">(Haskell)</small></h2>
+        <div class="panel-body">
+            <div class="section">
+                <h3>Registers</h3>
+                <div class="reg-row"><span class="reg-name">A</span><span id="regA" class="reg-val">0x00</span><span id="regA-bin" class="reg-bin">00000000</span></div>
+                <div class="reg-row"><span class="reg-name">B</span><span id="regB" class="reg-val">0x00</span><span id="regB-bin" class="reg-bin">00000000</span></div>
+                <div class="reg-row"><span class="reg-name">PC</span><span id="regPC" class="reg-val">0x00</span><span id="regPC-bin" class="reg-bin">00000000</span></div>
+                <div class="reg-row"><span class="reg-name">IR</span><span id="regIR" class="reg-val">0x00 0x00</span></div>
+            </div>
+            <div class="section">
+                <h3>Flags</h3>
+                <div class="flag-row">
+                    <span class="flag" id="flagZ">Z=0</span>
+                    <span class="flag" id="flagC">C=0</span>
+                    <span class="flag" id="flagN">N=0</span>
+                </div>
+            </div>
+            <div class="section">
+                <h3>Current Instruction</h3>
+                <div id="currentInstr" class="instr-display">---</div>
+                <div id="currentPhase" class="phase-display">IDLE</div>
+            </div>
+            <div class="section">
+                <h3>Zoom</h3>
+                <div id="zoomInfo" class="zoom-display">1.00x</div>
+                <div id="zoomHint" class="zoom-hint">Component View</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 下部コントロール -->
+    <div id="controls" class="panel">
+        <button id="btnStep">Step</button>
+        <button id="btnRun">Run</button>
+        <button id="btnPause" disabled>Pause</button>
+        <button id="btnReset">Reset</button>
+        <label>Speed: <input type="range" id="speedSlider" min="1" max="10" value="5"></label>
+        <span id="speedLabel">5</span>
+        <button id="btnFitView">Fit View</button>
+    </div>
+
+    <!-- 右サイドバー: プログラム -->
+    <div id="programPanel" class="panel">
+        <h2>Program</h2>
+        <div class="panel-body">
+            <select id="programSelect">
+                <option value="add">Addition (A+B)</option>
+                <option value="count">Count Up</option>
+                <option value="logic">Logic Ops</option>
+                <option value="fibonacci">Fibonacci</option>
+                <option value="custom">Custom</option>
+            </select>
+            <div id="programListing"></div>
+            <textarea id="customProgram" style="display:none" rows="10"
+                      placeholder="LOAD_A 5&#10;LOAD_B 3&#10;ADD&#10;HLT"></textarea>
+            <button id="btnLoad">Load Program</button>
+        </div>
+    </div>
+
+    <!-- メモリビューア -->
+    <div id="memoryPanel" class="panel">
+        <h2>Memory</h2>
+        <div class="panel-body">
+            <div id="memoryView"></div>
+        </div>
+    </div>
+
+    <!-- ヘルプ -->
+    <div id="helpOverlay" style="display:none">
+        <div class="help-content">
+            <h2>CPU Visualizer (Haskell + WASM)</h2>
+            <ul>
+                <li><strong>マウスホイール:</strong> ズーム</li>
+                <li><strong>ドラッグ:</strong> 画面移動</li>
+                <li><strong>Space:</strong> 1ステップ実行</li>
+                <li><strong>R:</strong> 連続実行 / P: 一時停止</li>
+            </ul>
+            <p>論理回路シミュレーションは <strong>純粋 Haskell</strong> で実装。<br>
+               GHC WASM バックエンドでコンパイルしてブラウザで動作します。</p>
+            <p>ビルド方法:</p>
+            <pre style="font-size:11px;background:#1a1a1a;padding:8px;border-radius:4px">
+# GHC WASM のインストール
+curl https://gitlab.haskell.org/haskell-wasm/ghc-wasm-meta/raw/master/bootstrap.sh | sh
+source ~/.ghc-wasm/env
+
+# WASMビルド
+wasm32-wasi-ghc -isrc src/Main.hs \
+  -o web/computersystem.wasm
+
+# サーバー起動
+python3 -m http.server 8080 -d web</pre>
+            <button onclick="document.getElementById('helpOverlay').style.display='none'">閉じる</button>
+        </div>
+    </div>
+
+    <button id="btnHelp">?</button>
+
+    <!-- JS -->
+    <script src="js/wasm-bridge.js"></script>
+    <script src="js/renderer.js"></script>
+    <script src="js/ui.js"></script>
+</body>
+</html>

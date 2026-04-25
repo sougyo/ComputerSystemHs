@@ -1,0 +1,373 @@
+/* CPU Visualizer - Dark Theme */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: #0a0a1a;
+    color: #e0e0e0;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+}
+
+#mainCanvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100vw;
+    height: 100vh;
+    cursor: grab;
+}
+#mainCanvas:active { cursor: grabbing; }
+
+.panel {
+    position: absolute;
+    background: rgba(10, 15, 30, 0.92);
+    border: 1px solid rgba(74, 158, 255, 0.3);
+    border-radius: 8px;
+    padding: 12px;
+    backdrop-filter: blur(8px);
+    z-index: 10;
+    font-size: 13px;
+}
+
+/* 左サイドバー */
+#sidebar {
+    top: 10px; left: 10px;
+    width: 260px;
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+}
+
+#sidebar h2 {
+    font-size: 16px;
+    color: #4a9eff;
+    margin-bottom: 10px;
+    border-bottom: 1px solid rgba(74, 158, 255, 0.3);
+    padding-bottom: 6px;
+}
+
+.section { margin-bottom: 12px; }
+.section h3 {
+    font-size: 12px;
+    color: #888;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+}
+
+.reg-row {
+    display: flex;
+    align-items: center;
+    padding: 3px 0;
+    gap: 8px;
+}
+.reg-name {
+    color: #ff9f43;
+    font-weight: bold;
+    width: 24px;
+}
+.reg-val {
+    color: #00ff88;
+    font-weight: bold;
+    width: 50px;
+}
+.reg-bin {
+    color: #666;
+    font-size: 11px;
+    letter-spacing: 1px;
+}
+
+.flag-row { display: flex; gap: 12px; }
+.flag {
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    font-size: 12px;
+}
+.flag.active {
+    background: rgba(0, 255, 136, 0.2);
+    color: #00ff88;
+}
+
+.instr-display {
+    color: #ff6b9d;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 4px 0;
+}
+
+.phase-display {
+    color: #4a9eff;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.zoom-display {
+    color: #00ff88;
+    font-size: 16px;
+    font-weight: bold;
+}
+.zoom-hint {
+    color: #666;
+    font-size: 11px;
+    margin-top: 2px;
+}
+
+/* 下部コントロール */
+#controls {
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+}
+
+#controls button {
+    background: rgba(74, 158, 255, 0.15);
+    border: 1px solid rgba(74, 158, 255, 0.4);
+    color: #4a9eff;
+    padding: 6px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    transition: all 0.2s;
+}
+#controls button:hover {
+    background: rgba(74, 158, 255, 0.3);
+    border-color: #4a9eff;
+}
+#controls button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+#controls button:active { transform: scale(0.96); }
+
+#controls label {
+    color: #888;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+#speedSlider { width: 80px; }
+#speedLabel { color: #00ff88; width: 16px; }
+
+/* 右サイドバー: プログラム */
+#programPanel {
+    top: 10px; right: 10px;
+    width: 240px;
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+}
+#programPanel h2 {
+    font-size: 16px;
+    color: #4a9eff;
+    margin-bottom: 10px;
+    border-bottom: 1px solid rgba(74, 158, 255, 0.3);
+    padding-bottom: 6px;
+}
+#programSelect {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(74, 158, 255, 0.3);
+    color: #e0e0e0;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 12px;
+    margin-bottom: 8px;
+}
+#programListing {
+    max-height: 300px;
+    overflow-y: auto;
+    font-size: 12px;
+    line-height: 1.8;
+}
+.prog-line {
+    display: flex;
+    padding: 1px 4px;
+    border-radius: 2px;
+}
+.prog-line.current {
+    background: rgba(255, 107, 157, 0.2);
+    border-left: 2px solid #ff6b9d;
+}
+.prog-addr {
+    color: #555;
+    width: 32px;
+    text-align: right;
+    margin-right: 8px;
+}
+.prog-hex {
+    color: #666;
+    width: 48px;
+    margin-right: 8px;
+}
+.prog-asm {
+    color: #e0e0e0;
+}
+#customProgram {
+    width: 100%;
+    height: 150px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(74,158,255,0.3);
+    color: #e0e0e0;
+    font-family: inherit;
+    font-size: 12px;
+    padding: 6px;
+    border-radius: 4px;
+    resize: vertical;
+    margin-bottom: 8px;
+}
+#btnLoad {
+    width: 100%;
+    background: rgba(0, 255, 136, 0.1);
+    border: 1px solid rgba(0, 255, 136, 0.3);
+    color: #00ff88;
+    padding: 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    margin-top: 8px;
+}
+#btnLoad:hover {
+    background: rgba(0, 255, 136, 0.2);
+}
+
+/* メモリビューア */
+#memoryPanel {
+    bottom: 60px; right: 10px;
+    width: 240px;
+    max-height: 250px;
+    overflow-y: auto;
+}
+#memoryPanel h2 {
+    font-size: 16px;
+    color: #4a9eff;
+    margin-bottom: 8px;
+    border-bottom: 1px solid rgba(74, 158, 255, 0.3);
+    padding-bottom: 6px;
+}
+#memoryView {
+    font-size: 11px;
+    line-height: 1.6;
+}
+.mem-row {
+    display: flex;
+    gap: 4px;
+}
+.mem-addr {
+    color: #555;
+    width: 28px;
+    text-align: right;
+}
+.mem-cell {
+    width: 22px;
+    text-align: center;
+    color: #666;
+    border-radius: 2px;
+}
+.mem-cell.nonzero {
+    color: #00ff88;
+    background: rgba(0, 255, 136, 0.08);
+}
+.mem-cell.current {
+    color: #ff6b9d;
+    background: rgba(255, 107, 157, 0.15);
+    font-weight: bold;
+}
+
+/* ヘルプ */
+#btnHelp {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(74, 158, 255, 0.15);
+    border: 1px solid rgba(74, 158, 255, 0.4);
+    color: #4a9eff;
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: bold;
+    z-index: 10;
+}
+#btnHelp:hover { background: rgba(74, 158, 255, 0.3); }
+
+#helpOverlay {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+.help-content {
+    background: #1a1a2e;
+    border: 1px solid rgba(74, 158, 255, 0.4);
+    border-radius: 12px;
+    padding: 24px 32px;
+    max-width: 480px;
+}
+.help-content h2 {
+    color: #4a9eff;
+    margin-bottom: 16px;
+}
+.help-content ul {
+    list-style: none;
+    margin-bottom: 16px;
+}
+.help-content li {
+    padding: 4px 0;
+    color: #ccc;
+}
+.help-content li strong { color: #ff9f43; }
+.help-content p { color: #888; margin-bottom: 16px; line-height: 1.6; }
+.help-content button {
+    background: rgba(74, 158, 255, 0.2);
+    border: 1px solid #4a9eff;
+    color: #4a9eff;
+    padding: 8px 24px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+/* 折りたたみパネル */
+.panel h2 {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.panel h2::after {
+    content: '▾';
+    font-size: 11px;
+    opacity: 0.7;
+    transition: transform 0.2s;
+    flex-shrink: 0;
+}
+.panel.collapsed h2::after {
+    transform: rotate(-90deg);
+}
+.panel.collapsed .panel-body {
+    display: none;
+}
+.panel.collapsed {
+    overflow: hidden;
+}
+
+/* スクロールバー */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: rgba(74, 158, 255, 0.3);
+    border-radius: 3px;
+}

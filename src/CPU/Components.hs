@@ -1,0 +1,551 @@
+{-# LANGUAGE StrictData #-}
+module CPU.Components
+  ( LayoutComp(..)
+  , LayoutGate(..)
+  , LayoutPin(..)
+  , LayoutSeg(..)
+  , buildCPU
+  , CPUBuildResult(..)
+  ) where
+
+import Control.Monad (forM, foldM)
+import Control.Monad.State.Strict (get, put)
+import Data.List (foldl')
+
+import Circuit (GateType(..), Gate(..))
+import Builder
+import CPU.Types
+
+-- ──────────────────────────────────────────────
+-- レイアウト型
+-- ──────────────────────────────────────────────
+
+data LayoutSeg = LayoutSeg
+  { lsX1, lsY1, lsX2, lsY2 :: !Double
+  , lsOwner :: !Int
+  } deriving Show
+
+data LayoutPin = LayoutPin
+  { lpWire :: !Int
+  , lpX, lpY :: !Double
+  } deriving Show
+
+data LayoutGate = LayoutGate
+  { lgId   :: !Int
+  , lgType :: !String
+  , lgName :: !String
+  , lgX, lgY, lgW, lgH :: !Double
+  , lgIns  :: ![Int]
+  , lgOut  :: !Int
+  } deriving Show
+
+data LayoutComp = LayoutComp
+  { lcId       :: !Int
+  , lcType     :: !String
+  , lcName     :: !String
+  , lcLabel    :: !String
+  , lcX, lcY  :: !Double
+  , lcW, lcH  :: !Double
+  , lcColor    :: !String
+  , lcChildren :: ![LayoutComp]
+  , lcGates    :: ![LayoutGate]
+  , lcWireSegs :: ![(Int, [LayoutSeg])]
+  , lcInputs   :: ![(String, LayoutPin)]
+  , lcOutputs  :: ![(String, LayoutPin)]
+  , lcExpandAt :: !Double
+  } deriving Show
+
+-- ゲートを追加し LayoutGate と出力ワイヤIDを返す
+lgate :: String -> String -> Double -> Double -> Double -> Double -> [Int]
+      -> Build (LayoutGate, Int)
+lgate typ name x y w h ins = do
+  s <- get
+  let gid = bsGateNext s
+      out = bsWireNext s
+      g   = Gate (readGType typ) ins out
+  put s { bsGateNext = gid + 1
+        , bsWireNext = out + 1
+        , bsGates    = bsGates s ++ [g]
+        }
+  return (LayoutGate gid typ name x y w h ins out, out)
+
+readGType :: String -> GateType
+readGType "AND"  = AND
+readGType "OR"   = OR
+readGType "NAND" = NAND
+readGType "NOR"  = NOR
+readGType "XOR"  = XOR
+readGType "XNOR" = XNOR
+readGType "NOT"  = NOT
+readGType _      = BUF
+
+-- Int → Double ヘルパー
+d :: Int -> Double
+d = fromIntegral
+
+-- ──────────────────────────────────────────────
+-- SR ラッチ (NAND 2つのクロス結合)
+-- ──────────────────────────────────────────────
+buildSRLatch :: String -> Double -> Double -> Int -> Int
+             -> Build (LayoutComp, Int, Int)
+buildSRLatch name x y wSb wRb = do
+  cid <- freshComp
+  wQ  <- freshWire
+  wQb <- freshWire
+  addGateFixed NAND [wSb, wQb] wQ
+  addGateFixed NAND [wRb, wQ]  wQb
+  s <- get
+  let gid = bsGateNext s - 2
+      lg1 = LayoutGate gid     "NAND" (name++"_n1") 6 1 5 4 [wSb,wQb] wQ
+      lg2 = LayoutGate (gid+1) "NAND" (name++"_n2") 6 8 5 4 [wRb,wQ]  wQb
+      segs = [ (wSb,  [LayoutSeg 0 3 6 3 cid])
+             , (wRb,  [LayoutSeg 0 11 6 10 cid])
+             , (wQ,   [LayoutSeg 11 3 20 3 cid
+                      ,LayoutSeg 13 3 13 10 cid, LayoutSeg 13 10 6 12 cid])
+             , (wQb,  [LayoutSeg 11 10 20 11 cid
+                      ,LayoutSeg 13 10 13 3 cid, LayoutSeg 13 3 6 5 cid])
+             ]
+  let comp = LayoutComp cid "SR_LATCH" name name x y 20 14 "#00cec9"
+               [] [lg1,lg2] segs
+               [("Sb", LayoutPin wSb 0 3), ("Rb", LayoutPin wRb 0 11)]
+               [("Q",  LayoutPin wQ  20 3), ("Qb", LayoutPin wQb 20 11)]
+               0
+  return (comp, wQ, wQb)
+
+-- ──────────────────────────────────────────────
+-- D ラッチ (EN=1で透過)
+-- ──────────────────────────────────────────────
+buildDLatch :: String -> Double -> Double -> Int -> Int
+            -> Build (LayoutComp, Int, Int)
+buildDLatch name x y wD wEN = do
+  cid <- freshComp
+  (lgNotD, wDb) <- lgate "NOT"  (name++"_notD") 3  2  4 3 [wD]
+  (lgN1,   wSb) <- lgate "NAND" (name++"_g1")   12 1  5 4 [wD, wEN]
+  (lgN2,   wRb) <- lgate "NAND" (name++"_g2")   12 14 5 4 [wDb, wEN]
+  (sr, wQ, wQb) <- buildSRLatch (name++"_sr") 22 3 wSb wRb
+  let segs = [ (wD,  [LayoutSeg 0 4 10 4 cid, LayoutSeg 3 4 3 3.5 cid
+                     ,LayoutSeg 10 4 10 2.33 cid, LayoutSeg 10 2.33 12 2.33 cid])
+             , (wEN, [LayoutSeg 0 18 11 18 cid, LayoutSeg 11 3.67 11 18 cid
+                     ,LayoutSeg 11 3.67 12 3.67 cid, LayoutSeg 11 16.67 12 16.67 cid])
+             , (wDb, [LayoutSeg 7 3.5 9 3.5 cid, LayoutSeg 9 3.5 9 15.33 cid
+                     ,LayoutSeg 9 15.33 12 15.33 cid])
+             , (wSb, [LayoutSeg 17 3 20 3 cid, LayoutSeg 20 3 20 6 cid
+                     ,LayoutSeg 20 6 22 6 cid])
+             , (wRb, [LayoutSeg 17 16 20 16 cid, LayoutSeg 20 16 20 14 cid
+                     ,LayoutSeg 20 14 22 14 cid])
+             ]
+  let comp = LayoutComp cid "D_LATCH" name name x y 44 22 "#00b894"
+               [sr] [lgNotD, lgN1, lgN2] segs
+               [("D",  LayoutPin wD 0 4), ("EN", LayoutPin wEN 0 18)]
+               [("Q",  LayoutPin wQ 44 6), ("Qb", LayoutPin wQb 44 16)]
+               0
+  return (comp, wQ, wQb)
+
+-- ──────────────────────────────────────────────
+-- D フリップフロップ (マスタースレーブ)
+-- ──────────────────────────────────────────────
+buildDFF :: String -> Double -> Double -> Int -> Int
+         -> Build (LayoutComp, Int, Int)
+buildDFF name x y wD wCLK = do
+  cid <- freshComp
+  (lgNotClk, wClkBar) <- lgate "NOT" (name++"_notclk") 49 12 4 4 [wCLK]
+  (master, wMQ, _)    <- buildDLatch (name++"_master") 5  3 wD wCLK
+  (slave,  wQ,  wQb)  <- buildDLatch (name++"_slave")  53 3 wMQ wClkBar
+  let segs = [ (wD,      [LayoutSeg 0 4 5 4 cid, LayoutSeg 5 4 5 7 cid])
+             , (wCLK,    [LayoutSeg 0 22 3 22 cid, LayoutSeg 3 22 3 14 cid
+                         ,LayoutSeg 3 21 5 21 cid, LayoutSeg 3 14 49 14 cid])
+             , (wClkBar, [LayoutSeg 53 14 55 14 cid, LayoutSeg 55 14 55 21 cid
+                         ,LayoutSeg 55 21 53 21 cid])
+             , (wMQ,     [LayoutSeg 49 9 51 9 cid, LayoutSeg 51 9 51 7 cid
+                         ,LayoutSeg 51 7 53 7 cid])
+             , (wQ,      [LayoutSeg 97 9 99 9 cid, LayoutSeg 99 9 99 6 cid
+                         ,LayoutSeg 99 6 100 6 cid])
+             , (wQb,     [LayoutSeg 97 19 100 19 cid])
+             ]
+  let comp = LayoutComp cid "DFF" name name x y 100 28 "#00cec9"
+               [master, slave] [lgNotClk] segs
+               [("D", LayoutPin wD 0 4), ("CLK", LayoutPin wCLK 0 22)]
+               [("Q", LayoutPin wQ 100 6), ("Qb", LayoutPin wQb 100 19)]
+               120
+  return (comp, wQ, wQb)
+
+-- ──────────────────────────────────────────────
+-- 8ビットレジスタ (8個のDFF)
+-- ──────────────────────────────────────────────
+buildRegister8 :: String -> Double -> Double -> [Int] -> Int
+               -> Build (LayoutComp, [Int])
+buildRegister8 name x y wDs wCLK = do
+  cid <- freshComp
+  results <- forM (zip wDs [0..7]) $ \(wD, i) -> do
+    (dff, wQ, _) <- buildDFF (name++"_DFF"++show (i::Int)) 8 (5 + d i*28) wD wCLK
+    return (dff, wQ)
+  let (dffs, wQs) = unzip results
+      ins  = zipWith (\wD i -> ("D"++show (i::Int), LayoutPin wD 0 (10+d i*28))) wDs [0..7]
+      outs = zipWith (\wQ i -> ("Q"++show (i::Int), LayoutPin wQ 116 (10+d i*28))) wQs [0..7]
+  let comp = LayoutComp cid "REGISTER" name name x y 116 240 "#0984e3"
+               dffs [] []
+               (("CLK", LayoutPin wCLK 0 235) : ins) outs
+               0
+  return (comp, wQs)
+
+-- ──────────────────────────────────────────────
+-- ハーフアダー: XOR + AND
+-- ──────────────────────────────────────────────
+buildHalfAdder :: String -> Double -> Double -> Int -> Int
+               -> Build (LayoutComp, Int, Int)
+buildHalfAdder name x y wA wB = do
+  cid <- freshComp
+  (lgXor, wSum)   <- lgate "XOR" (name++"_xor") 10 1 6 4 [wA, wB]
+  (lgAnd, wCarry) <- lgate "AND" (name++"_and") 10 9 6 4 [wA, wB]
+  let segs = [ (wA,     [LayoutSeg 0 4 10 3 cid, LayoutSeg 0 4 10 11 cid])
+             , (wB,     [LayoutSeg 0 12 10 5 cid, LayoutSeg 0 12 10 13 cid])
+             , (wSum,   [LayoutSeg 16 3 24 4 cid])
+             , (wCarry, [LayoutSeg 16 11 24 12 cid])
+             ]
+  let comp = LayoutComp cid "HALF_ADDER" name name x y 24 16 "#6c5ce7"
+               [] [lgXor, lgAnd] segs
+               [("A", LayoutPin wA 0 4), ("B", LayoutPin wB 0 12)]
+               [("Sum", LayoutPin wSum 24 4), ("Carry", LayoutPin wCarry 24 12)]
+               0
+  return (comp, wSum, wCarry)
+
+-- ──────────────────────────────────────────────
+-- フルアダー: HA×2 + OR
+-- ──────────────────────────────────────────────
+buildFullAdder :: String -> Double -> Double -> Int -> Int -> Int
+               -> Build (LayoutComp, Int, Int)
+buildFullAdder name x y wA wB wCin = do
+  cid <- freshComp
+  (ha1, ha1Sum, ha1Carry) <- buildHalfAdder (name++"_HA1") 5 2  wA wB
+  (ha2, ha2Sum, ha2Carry) <- buildHalfAdder (name++"_HA2") 5 20 ha1Sum wCin
+  (lgOr, wCout) <- lgate "OR" (name++"_or") 38 16 5 3 [ha1Carry, ha2Carry]
+  let segs = [ (wA,       [LayoutSeg 0 8 5 6 cid])
+             , (wB,       [LayoutSeg 0 16 5 14 cid])
+             , (wCin,     [LayoutSeg 0 32 5 32 cid])
+             , (ha1Sum,   [LayoutSeg 29 6 5 24 cid])
+             , (ha1Carry, [LayoutSeg 29 14 38 18 cid])
+             , (ha2Carry, [LayoutSeg 29 32 38 20 cid])
+             , (wCout,    [LayoutSeg 44 18 55 18 cid])
+             , (ha2Sum,   [LayoutSeg 29 24 55 8 cid])
+             ]
+  let comp = LayoutComp cid "FULL_ADDER" name name x y 55 40 "#a29bfe"
+               [ha1, ha2] [lgOr] segs
+               [("A",LayoutPin wA 0 8),("B",LayoutPin wB 0 16),("Cin",LayoutPin wCin 0 32)]
+               [("Sum",LayoutPin ha2Sum 55 8),("Cout",LayoutPin wCout 55 18)]
+               0
+  return (comp, ha2Sum, wCout)
+
+-- ──────────────────────────────────────────────
+-- 8ビットリップルキャリー加算器
+-- ──────────────────────────────────────────────
+buildAdder8 :: String -> Double -> Double -> [Int] -> [Int] -> Int
+            -> Build (LayoutComp, [Int], Int)
+buildAdder8 name x y wAs wBs wCin = do
+  cid <- freshComp
+  (fas, sums, lastCout) <- foldM step ([], [], wCin) (zip3 wAs wBs [0..7])
+  let mkSeg (wA, wB, i) =
+        [(wA, [LayoutSeg (5+d i*58+2) 0 (5+d i*58) 13 cid])
+        ,(wB, [LayoutSeg (5+d i*58+12) 0 (5+d i*58) 21 cid])]
+      segs = concatMap mkSeg (zip3 wAs wBs [0..7])
+      ins  = ("Cin", LayoutPin wCin 0 45)
+           : concatMap (\(wA,wB,i) ->
+               [("A"++show (i::Int), LayoutPin wA (5+d i*58+2) 0)
+               ,("B"++show (i::Int), LayoutPin wB (5+d i*58+12) 0)])
+               (zip3 wAs wBs [0..7])
+      outs = ("Cout", LayoutPin lastCout 480 45)
+           : zipWith (\s i -> ("S"++show (i::Int), LayoutPin s (5+d i*58+55) 13)) sums [0..7]
+  let comp = LayoutComp cid "ADDER_8BIT" name name x y 480 55 "#0984e3"
+               fas [] segs ins outs 0
+  return (comp, sums, lastCout)
+  where
+    step (faDone, sumsDone, cin) (wA, wB, i) = do
+      (fa, faSum, faCout) <- buildFullAdder
+        (name++"_FA"++show (i::Int)) (5+d i*58) 5 wA wB cin
+      return (faDone++[fa], sumsDone++[faSum], faCout)
+
+-- ──────────────────────────────────────────────
+-- 8ビット ビット演算ブロック
+-- ──────────────────────────────────────────────
+buildBitwise8 :: String -> String -> String -> Double -> Double -> [Int] -> [Int]
+              -> Build (LayoutComp, [Int])
+buildBitwise8 name typ color x y wAs wBs = do
+  cid <- freshComp
+  results <- forM (zip3 wAs wBs [0..7]) $ \(wA, wB, i) -> do
+    (lg, wR) <- lgate typ (name++"_"++typ++show (i::Int))
+                          (5+d i*58) 5 6 3 [wA, wB]
+    return (lg, wR)
+  let (lgs, wRs) = unzip results
+      segs = concatMap (\(wA,wB,wR,i) ->
+               [(wA, [LayoutSeg (5+d i*58) 0 (5+d i*58) 7 cid])
+               ,(wB, [LayoutSeg (5+d i*58+3) 0 (5+d i*58+3) 9 cid])
+               ,(wR, [LayoutSeg (11+d i*58) 7 (11+d i*58) 20 cid])
+               ]) (zip4 wAs wBs wRs [0..7])
+      ins  = concatMap (\(wA,wB,i) ->
+               [("A"++show (i::Int), LayoutPin wA (5+d i*58) 0)
+               ,("B"++show (i::Int), LayoutPin wB (5+d i*58+3) 0)])
+               (zip3 wAs wBs [0..7])
+      outs = zipWith (\wR i -> ("R"++show (i::Int), LayoutPin wR (11+d i*58) 7)) wRs [0..7]
+  let comp = LayoutComp cid ("BITWISE_"++typ) name name x y 480 20 color
+               [] lgs segs ins outs 0
+  return (comp, wRs)
+
+zip4 :: [a]->[b]->[c]->[d]->[(a,b,c,d)]
+zip4 (a:as)(b:bs)(c:cs)(dd:ds) = (a,b,c,dd):zip4 as bs cs ds
+zip4 _ _ _ _ = []
+
+-- ──────────────────────────────────────────────
+-- 8ビット NOT ブロック
+-- ──────────────────────────────────────────────
+buildNot8 :: String -> Double -> Double -> [Int] -> Build (LayoutComp, [Int])
+buildNot8 name x y wAs = do
+  cid <- freshComp
+  results <- forM (zip wAs [0..7]) $ \(wA, i) -> do
+    (lg, wR) <- lgate "NOT" (name++"_NOT"++show (i::Int)) (5+d i*58) 5 6 3 [wA]
+    return (lg, wR)
+  let (lgs, wRs) = unzip results
+      ins  = zipWith (\wA i -> ("A"++show (i::Int), LayoutPin wA (5+d i*58) 0)) wAs [0..7]
+      outs = zipWith (\wR i -> ("R"++show (i::Int), LayoutPin wR (11+d i*58) 7)) wRs [0..7]
+  let comp = LayoutComp cid "NOT_8BIT" name name x y 480 18 "#d63031"
+               [] lgs [] ins outs 0
+  return (comp, wRs)
+
+-- ──────────────────────────────────────────────
+-- 2-to-1 MUX (1ビット): NOT + AND×2 + OR
+-- ──────────────────────────────────────────────
+buildMux2 :: String -> Double -> Double -> Int -> Int -> Int
+          -> Build (LayoutComp, Int)
+buildMux2 name x y wA wB wSel = do
+  cid <- freshComp
+  (lgNot,  wNotSel) <- lgate "NOT" (name++"_not")  3  1 4 3 [wSel]
+  (lgAnd1, wA1)     <- lgate "AND" (name++"_and1") 10 0 6 3 [wA, wNotSel]
+  (lgAnd2, wA2)     <- lgate "AND" (name++"_and2") 10 8 6 3 [wB, wSel]
+  (lgOr,   wOut)    <- lgate "OR"  (name++"_or")   18 4 6 3 [wA1, wA2]
+  let comp = LayoutComp cid "MUX2" name name x y 24 18 "#e84393"
+               [] [lgNot, lgAnd1, lgAnd2, lgOr] []
+               [("A",LayoutPin wA 0 2),("B",LayoutPin wB 0 10),("Sel",LayoutPin wSel 0 16)]
+               [("Out", LayoutPin wOut 24 6)]
+               0
+  return (comp, wOut)
+
+-- ──────────────────────────────────────────────
+-- 8ビット 4-to-1 MUX
+-- ──────────────────────────────────────────────
+buildMux4_8bit :: String -> Double -> Double
+               -> [Int] -> [Int] -> [Int] -> [Int] -> Int -> Int
+               -> Build (LayoutComp, [Int])
+buildMux4_8bit name x y wI0s wI1s wI2s wI3s wSel0 wSel1 = do
+  cid <- freshComp
+  results <- forM (zip4 wI0s wI1s wI2s wI3s `zip` wI3s `zip` [0..7]) $
+             \(((w0,w1,w2,w3),_),i) -> do
+    (ma, outA) <- buildMux2 (name++"_m1a_"++show (i::Int)) (10+d i*13) 5  w0 w1 wSel0
+    (mb, outB) <- buildMux2 (name++"_m1b_"++show (i::Int)) (10+d i*13) 30 w2 w3 wSel0
+    (mc, outC) <- buildMux2 (name++"_m2_" ++show (i::Int)) (10+d i*13) 58 outA outB wSel1
+    return ([ma,mb,mc], outC)
+  let (childGroups, outs) = unzip results
+      allChildren = concat childGroups
+      selIns = [("Sel0",LayoutPin wSel0 60 90),("Sel1",LayoutPin wSel1 70 90)]
+      bitIns = concatMap (\(w0,w1,w2,w3,i) ->
+                 [("I0_"++show (i::Int),LayoutPin w0 0 8)
+                 ,("I1_"++show (i::Int),LayoutPin w1 0 18)
+                 ,("I2_"++show (i::Int),LayoutPin w2 0 38)
+                 ,("I3_"++show (i::Int),LayoutPin w3 0 48)])
+                 (zip5 wI0s wI1s wI2s wI3s [0..7])
+      bitOuts = zipWith (\o i -> ("O"++show (i::Int), LayoutPin o 120 64)) outs [0..7]
+  let comp = LayoutComp cid "MUX4_8BIT" name name x y 120 90 "#e84393"
+               allChildren [] [] (selIns++bitIns) bitOuts 0
+  return (comp, outs)
+
+zip5 :: [a]->[b]->[c]->[d]->[e]->[(a,b,c,d,e)]
+zip5 (a:as)(b:bs)(c:cs)(dd:ds)(e:es) = (a,b,c,dd,e):zip5 as bs cs ds es
+zip5 _ _ _ _ _ = []
+
+-- ──────────────────────────────────────────────
+-- 8ビット ALU
+-- ──────────────────────────────────────────────
+buildALU :: String -> Double -> Double -> [Int] -> [Int]
+         -> Int -> Int -> Int
+         -> Build (LayoutComp, [Int], Int, Int)
+buildALU name x y wAs wBs wSel0 wSel1 wSubMode = do
+  cid <- freshComp
+  (bInvComp, wBinvs) <- buildBitwise8 (name++"_binv") "XOR" "#636e72" 10 5
+                          wBs (replicate 8 wSubMode)
+  (adder, sums, cout) <- buildAdder8 (name++"_add") 10 30 wAs wBinvs wSubMode
+  (andBlk, andOuts)   <- buildBitwise8 (name++"_and") "AND" "#00b894" 10 95  wAs wBs
+  (orBlk,  orOuts)    <- buildBitwise8 (name++"_or")  "OR"  "#fdcb6e" 10 125 wAs wBs
+  (xorBlk, xorOuts)   <- buildBitwise8 (name++"_xor") "XOR" "#e17055" 10 155 wAs wBs
+  (mux, muxOuts) <- buildMux4_8bit (name++"_mux") 10 180
+                      sums andOuts orOuts xorOuts wSel0 wSel1
+  -- ゼロフラグ検出 OR ツリー
+  (_, wz1) <- lgate "OR" (name++"_zor1") 0  270 5 3 [muxOuts!!0, muxOuts!!1]
+  (_, wz2) <- lgate "OR" (name++"_zor2") 0  276 5 3 [muxOuts!!2, muxOuts!!3]
+  (_, wz3) <- lgate "OR" (name++"_zor3") 0  282 5 3 [muxOuts!!4, muxOuts!!5]
+  (_, wz4) <- lgate "OR" (name++"_zor4") 0  288 5 3 [muxOuts!!6, muxOuts!!7]
+  (_, wz5) <- lgate "OR" (name++"_zor5") 10 272 5 3 [wz1, wz2]
+  (_, wz6) <- lgate "OR" (name++"_zor6") 10 284 5 3 [wz3, wz4]
+  (_, wz7) <- lgate "OR" (name++"_zor7") 20 278 5 3 [wz5, wz6]
+  (lgNotZ, wZero) <- lgate "NOT" (name++"_notZ") 30 277 4 3 [wz7]
+  let ins  = [("Op0",LayoutPin wSel0 200 280),("Op1",LayoutPin wSel1 220 280)
+             ,("Sub",LayoutPin wSubMode 240 280)]
+             ++ zipWith (\w i -> ("A"++show (i::Int), LayoutPin w 0 (40+d i*6))) wAs [0..7]
+             ++ zipWith (\w i -> ("B"++show (i::Int), LayoutPin w 0 (100+d i*6))) wBs [0..7]
+      outs = [("Zero",LayoutPin wZero 520 250),("Cout",LayoutPin cout 520 260)]
+             ++ zipWith (\w i -> ("R"++show (i::Int), LayoutPin w 520 (190+d i*6))) muxOuts [0..7]
+  let comp = LayoutComp cid "ALU" name "ALU" x y 520 280 "#e17055"
+               [bInvComp, adder, andBlk, orBlk, xorBlk, mux]
+               [lgNotZ] []
+               ins outs 0
+  return (comp, muxOuts, wZero, cout)
+
+-- ──────────────────────────────────────────────
+-- 命令デコーダ
+-- ──────────────────────────────────────────────
+buildDecoder :: String -> Double -> Double -> [Int]
+             -> Build (LayoutComp, DecoderRefs)
+buildDecoder name x y opBits = do
+  cid <- freshComp
+  invResults <- forM (zip opBits [0..7]) $ \(wOp, i) ->
+    lgate "NOT" (name++"_not"++show (i::Int)) 10 (8+d i*16) 4 3 [wOp]
+  let (invGates, opInvs) = unzip invResults
+  let det pat yp = do
+        let ins = [ if (pat `div` (2^(b::Int))) `mod` 2 == 1
+                    then opBits!!b else opInvs!!b
+                  | b <- [0..3] ]
+        (_, w) <- lgate "AND" (name++"_det"++show pat) 50 yp 5 3 ins
+        return w
+  isLoadA  <- det 0x1 5;  isLoadB  <- det 0x2 15
+  isLoadAM <- det 0x3 25; isStoreA <- det 0x4 35
+  isAdd    <- det 0x5 45; isSub    <- det 0x6 55
+  isAnd    <- det 0x7 65; isOr     <- det 0x8 75
+  isXor    <- det 0x9 85; isNot    <- det 0xA 95
+  isJmp    <- det 0xB 105; isJz   <- det 0xC 115
+  isHlt    <- det 0xF 135
+  let ctrl srcs yp = case srcs of
+        [w] -> return w
+        _   -> do (_, w) <- lgate "OR" (name++"_ctrl") 130 yp 5 3 srcs; return w
+  wRegWrite <- ctrl [isLoadA,isLoadB,isLoadAM,isAdd,isSub,isAnd,isOr,isXor,isNot] 10
+  wMemRead  <- ctrl [isLoadAM] 25
+  wMemWrite <- ctrl [isStoreA] 35
+  wAluOp0   <- ctrl [isAnd, isXor] 55
+  wAluOp1   <- ctrl [isOr,  isXor] 65
+  wSubMode  <- ctrl [isSub] 75
+  wBranch   <- ctrl [isJmp] 95
+  wBranchZ  <- ctrl [isJz]  105
+  wHalt     <- ctrl [isHlt] 135
+  wLoadImm  <- ctrl [isLoadA, isLoadB] 145
+  wRegDstB  <- ctrl [isLoadB] 155
+  let refs = DecoderRefs wRegWrite wMemRead wMemWrite wAluOp0 wAluOp1
+               wSubMode wBranch wBranchZ wHalt wLoadImm wRegDstB
+      ins  = zipWith (\w i -> ("Op"++show (i::Int), LayoutPin w 0 (10+d i*16))) opBits [0..7]
+      outs = [("RegWrite",LayoutPin wRegWrite 200 10),("MemRead",LayoutPin wMemRead 200 25)
+             ,("MemWrite",LayoutPin wMemWrite 200 35),("AluOp0",LayoutPin wAluOp0 200 55)
+             ,("AluOp1",LayoutPin wAluOp1 200 65),("SubMode",LayoutPin wSubMode 200 75)
+             ,("Branch",LayoutPin wBranch 200 95),("BranchZ",LayoutPin wBranchZ 200 105)
+             ,("Halt",LayoutPin wHalt 200 135)]
+  let comp = LayoutComp cid "DECODER" name "Instruction Decoder" x y 200 160 "#fdcb6e"
+               [] invGates [] ins outs 0
+  return (comp, refs)
+
+-- ──────────────────────────────────────────────
+-- メモリユニット (可視化用)
+-- ──────────────────────────────────────────────
+buildMemory :: String -> Double -> Double
+            -> Build (LayoutComp, [Int], [Int], [Int], Int, Int)
+buildMemory name x y = do
+  cid <- freshComp
+  addrIns <- mapM (\_ -> freshWire) [0..7::Int]
+  datIns  <- mapM (\_ -> freshWire) [0..7::Int]
+  datOuts <- mapM (\_ -> freshWire) [0..7::Int]
+  wRead   <- freshWire
+  wWrite  <- freshWire
+  cellGates <- forM [(r,c) | r<-[0..3::Int], c<-[0..3::Int]] $ \(r,c) -> do
+    wDummy <- freshWire
+    (lg, _) <- lgate "AND" (name++"_cell_"++show r++"_"++show c)
+                 (30+d c*30) (30+d r*50) 20 12 [wDummy]
+    return lg
+  let ins  = zipWith (\w i -> ("Addr"++show (i::Int), LayoutPin w 0 (10+d i*14))) addrIns [0..7]
+          ++ zipWith (\w i -> ("Din"++show (i::Int),  LayoutPin w 0 (130+d i*14))) datIns [0..7]
+          ++ [("Read",LayoutPin wRead 80 0),("Write",LayoutPin wWrite 100 0)]
+      outs = zipWith (\w i -> ("Dout"++show (i::Int), LayoutPin w 160 (10+d i*14))) datOuts [0..7]
+  let comp = LayoutComp cid "MEMORY" name "Memory (256 bytes)" x y 160 260 "#6c5ce7"
+               [] cellGates [] ins outs 0
+  return (comp, addrIns, datIns, datOuts, wRead, wWrite)
+
+-- ──────────────────────────────────────────────
+-- プログラムカウンタ
+-- ──────────────────────────────────────────────
+buildPC :: String -> Double -> Double -> [Int] -> [Int] -> Int -> Int
+        -> Build (LayoutComp, [Int])
+buildPC name x y wNexts wTargets wBranch wCLK = do
+  cid <- freshComp
+  muxOuts <- forM (zip3 wNexts wTargets [0..7]) $ \(wNext, wTarget, i) -> do
+    (_, wOut) <- buildMux2 (name++"_mux"++show (i::Int)) 70 (10+d i*28) wNext wTarget wBranch
+    return wOut
+  (reg, wQs) <- buildRegister8 (name++"_reg") 10 5 muxOuts wCLK
+  let ins  = zipWith (\w i -> ("Next"++show (i::Int),   LayoutPin w 0 (10+d i*28))) wNexts   [0..7]
+          ++ zipWith (\w i -> ("Target"++show (i::Int), LayoutPin w 0 (20+d i*28))) wTargets [0..7]
+          ++ [("Branch",LayoutPin wBranch 50 260),("CLK",LayoutPin wCLK 65 0)]
+      outs = zipWith (\w i -> ("Q"++show (i::Int), LayoutPin w 130 (10+d i*28))) wQs [0..7]
+  let comp = LayoutComp cid "PC" name "Program Counter" x y 130 260 "#e84393"
+               [reg] [] [] ins outs 0
+  return (comp, wQs)
+
+-- ──────────────────────────────────────────────
+-- CPU全体の構築
+-- ──────────────────────────────────────────────
+data CPUBuildResult = CPUBuildResult
+  { cbrLayout :: !LayoutComp
+  , cbrGates  :: ![Gate]
+  , cbrRefs   :: !CPURefs
+  } deriving Show
+
+buildCPU :: CPUBuildResult
+buildCPU = fst $ runBuild go
+  where
+  go = do
+    wCLK     <- freshWire
+    wSel0    <- freshWire
+    wSel1    <- freshWire
+    wSubMode <- freshWire
+    wBranch  <- freshWire
+    regADins <- mapM (\_ -> freshWire) [0..7::Int]
+    regBDins <- mapM (\_ -> freshWire) [0..7::Int]
+    irDins   <- mapM (\_ -> freshWire) [0..7::Int]
+    irLDins  <- mapM (\_ -> freshWire) [0..7::Int]
+    decOpIns <- mapM (\_ -> freshWire) [0..7::Int]
+    aluAIns  <- mapM (\_ -> freshWire) [0..7::Int]
+    aluBIns  <- mapM (\_ -> freshWire) [0..7::Int]
+    pcNexts  <- mapM (\_ -> freshWire) [0..7::Int]
+    pcTargets<- mapM (\_ -> freshWire) [0..7::Int]
+    (regA, regAOuts) <- buildRegister8 "RegA" 200 280 regADins wCLK
+    (regB, regBOuts) <- buildRegister8 "RegB" 320 280 regBDins wCLK
+    (ir,   irOuts)   <- buildRegister8 "IR_H" 700 50  irDins   wCLK
+    (irL,  irLOuts)  <- buildRegister8 "IR_L" 820 50  irLDins  wCLK
+    (dec,  decRefs)  <- buildDecoder   "DEC"  450 50  decOpIns
+    (mem, memAddrs, _memDatIns, memDatOuts, wMemRead, wMemWrite)
+                     <- buildMemory "MEM" 200 50
+    (pc, pcOuts)     <- buildPC "PC" 50 50 pcNexts pcTargets wBranch wCLK
+    (alu, aluOuts, wZero, wCout)
+                     <- buildALU "ALU" 450 280 aluAIns aluBIns wSel0 wSel1 wSubMode
+    s <- get
+    let refs = CPURefs
+          { crRegAIns    = regADins,  crRegAOuts   = regAOuts
+          , crRegBIns    = regBDins,  crRegBOuts   = regBOuts
+          , crPCOuts     = pcOuts
+          , crIRIns      = irDins,    crIROuts     = irOuts
+          , crIRLIns     = irLDins,   crIRLOuts    = irLOuts
+          , crDecOpIns   = decOpIns,  crDecOuts    = decRefs
+          , crALUAIns    = aluAIns,   crALUBIns    = aluBIns
+          , crALUOp0     = wSel0,     crALUOp1     = wSel1
+          , crALUSub     = wSubMode
+          , crALUResults = aluOuts,   crALUZero    = wZero
+          , crALUCout    = wCout
+          , crMemAddrIns = memAddrs,  crMemDatOuts = memDatOuts
+          , crMemRead    = wMemRead,  crMemWrite   = wMemWrite
+          }
+    cid <- freshComp
+    let cpu = LayoutComp cid "CPU" "CPU" "CPU" 0 0 1200 800 "#2d3436"
+                [regA{lcLabel="Register A"}, regB{lcLabel="Register B"}
+                ,ir{lcLabel="IR (Opcode)"}, irL{lcLabel="IR (Operand)"}
+                ,dec, mem, pc, alu]
+                [] [] [] [] 0
+    return $ CPUBuildResult cpu (bsGates s) refs
