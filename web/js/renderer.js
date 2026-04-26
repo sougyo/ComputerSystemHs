@@ -114,6 +114,9 @@ class Renderer {
             this._drawWireSegs(ctx, ws.wireId, ws.segs, cx, cy, z);
         }
 
+        // ピンラベル
+        this._drawPinLabels(ctx, comp, cx, cy, z);
+
         // 子コンポーネント
         for (const child of (comp.children || [])) {
             this._drawComp(ctx, child, cx, cy);
@@ -125,6 +128,52 @@ class Renderer {
                 this._drawGate(ctx, g, cx, cy, z);
             }
         }
+    }
+
+    _drawPinLabels(ctx, comp, cx, cy, z) {
+        const fontSize = Math.min(comp.h * 0.05, 2);
+        if (fontSize * z < 6) return;
+
+        const abbrev = name => {
+            if (name === 'Sum')    return 'S';
+            if (name === 'Cout')   return 'Co';
+            if (name === 'Cin')    return 'Ci';
+            if (name === 'Carry')  return 'Cy';
+            if (name === 'CLK')    return 'CK';
+            if (name === 'Branch') return 'Br';
+            return name.length <= 3 ? name : name.substring(0, 2);
+        };
+
+        ctx.font = `bold ${fontSize}px monospace`;
+        const pad = fontSize * 0.25;
+        const r   = fontSize * 0.18;
+
+        const drawPin = (pin, isInput) => {
+            const px = cx + pin.x;
+            const py = cy + pin.y;
+            const active = !!(this.wires[pin.wire]);
+            const color = active ? '#00ff88' : '#74b9ff';
+
+            // 接続点に小さい丸
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(px, py, r, 0, Math.PI * 2);
+            ctx.fill();
+
+            // ラベル: 入力は右(内側)へ、出力は左(内側)へ
+            ctx.fillStyle = color;
+            if (isInput) {
+                ctx.textAlign = 'left';
+                ctx.fillText(abbrev(pin.name), px + pad, py + fontSize * 0.35);
+            } else {
+                ctx.textAlign = 'right';
+                ctx.fillText(abbrev(pin.name), px - pad, py + fontSize * 0.35);
+            }
+        };
+
+        for (const pin of (comp.inputs  || [])) drawPin(pin, true);
+        for (const pin of (comp.outputs || [])) drawPin(pin, false);
+        ctx.textAlign = 'left';
     }
 
     _drawWireSegs(ctx, wireId, segs, baseX, baseY, z) {
