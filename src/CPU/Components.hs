@@ -410,29 +410,42 @@ buildDecoder name x y opBits = do
         let ins = [ if (pat `div` (2^(b::Int))) `mod` 2 == 1
                     then opBits!!b else opInvs!!b
                   | b <- [0..3] ]
-        (_, w) <- lgate "AND" (name++"_det"++show pat) 50 yp 5 3 ins
-        return w
-  isLoadA  <- det 0x1 5;  isLoadB  <- det 0x2 15
-  isLoadAM <- det 0x3 25; isStoreA <- det 0x4 35
-  isAdd    <- det 0x5 45; isSub    <- det 0x6 55
-  isAnd    <- det 0x7 65; isOr     <- det 0x8 75
-  isXor    <- det 0x9 85; isNot    <- det 0xA 95
-  isJmp    <- det 0xB 105; isJz   <- det 0xC 115
-  isHlt    <- det 0xF 135
+        (lg, w) <- lgate "AND" (name++"_det"++show pat) 50 yp 5 3 ins
+        return (lg, w)
+  detResults <- sequence
+    [ det 0x1 5,  det 0x2 15, det 0x3 25, det 0x4 35
+    , det 0x5 45, det 0x6 55, det 0x7 65, det 0x8 75
+    , det 0x9 85, det 0xA 95, det 0xB 105, det 0xC 115
+    , det 0xF 135 ]
+  let detGates = map fst detResults
+      dw        = map snd detResults
+      isLoadA   = dw!!0;  isLoadB  = dw!!1;  isLoadAM = dw!!2;  isStoreA = dw!!3
+      isAdd     = dw!!4;  isSub    = dw!!5;  isAnd    = dw!!6;  isOr     = dw!!7
+      isXor     = dw!!8;  isNot    = dw!!9;  isJmp    = dw!!10; isJz     = dw!!11
+      isHlt     = dw!!12
   let ctrl srcs yp = case srcs of
-        [w] -> return w
-        _   -> do (_, w) <- lgate "OR" (name++"_ctrl") 130 yp 5 3 srcs; return w
-  wRegWrite <- ctrl [isLoadA,isLoadB,isLoadAM,isAdd,isSub,isAnd,isOr,isXor,isNot] 10
-  wMemRead  <- ctrl [isLoadAM] 25
-  wMemWrite <- ctrl [isStoreA] 35
-  wAluOp0   <- ctrl [isAnd, isXor] 55
-  wAluOp1   <- ctrl [isOr,  isXor] 65
-  wSubMode  <- ctrl [isSub] 75
-  wBranch   <- ctrl [isJmp] 95
-  wBranchZ  <- ctrl [isJz]  105
-  wHalt     <- ctrl [isHlt] 135
-  wLoadImm  <- ctrl [isLoadA, isLoadB] 145
-  wRegDstB  <- ctrl [isLoadB] 155
+        [w] -> return (Nothing, w)
+        _   -> do (lg, w) <- lgate "OR" (name++"_ctrl") 130 yp 5 3 srcs
+                  return (Just lg, w)
+  ctrlResults <- sequence
+    [ ctrl [isLoadA,isLoadB,isLoadAM,isAdd,isSub,isAnd,isOr,isXor,isNot] 10
+    , ctrl [isLoadAM] 25
+    , ctrl [isStoreA] 35
+    , ctrl [isAnd, isXor] 55
+    , ctrl [isOr,  isXor] 65
+    , ctrl [isSub] 75
+    , ctrl [isJmp] 95
+    , ctrl [isJz]  105
+    , ctrl [isHlt] 135
+    , ctrl [isLoadA, isLoadB] 145
+    , ctrl [isLoadB] 155
+    ]
+  let ctrlGates = [lg | (Just lg, _) <- ctrlResults]
+      cw         = map snd ctrlResults
+      wRegWrite  = cw!!0;  wMemRead  = cw!!1;  wMemWrite = cw!!2
+      wAluOp0    = cw!!3;  wAluOp1   = cw!!4;  wSubMode  = cw!!5
+      wBranch    = cw!!6;  wBranchZ  = cw!!7;  wHalt     = cw!!8
+      wLoadImm   = cw!!9;  wRegDstB  = cw!!10
   let refs = DecoderRefs wRegWrite wMemRead wMemWrite wAluOp0 wAluOp1
                wSubMode wBranch wBranchZ wHalt wLoadImm wRegDstB
       ins  = zipWith (\w i -> ("Op"++show (i::Int), LayoutPin w 0 (10+d i*16))) opBits [0..7]
@@ -441,8 +454,58 @@ buildDecoder name x y opBits = do
              ,("AluOp1",LayoutPin wAluOp1 200 65),("SubMode",LayoutPin wSubMode 200 75)
              ,("Branch",LayoutPin wBranch 200 95),("BranchZ",LayoutPin wBranchZ 200 105)
              ,("Halt",LayoutPin wHalt 200 135)]
+      allGates = invGates ++ detGates ++ ctrlGates
+      -- ワイヤセグメント用定数
+      andYs   = [5,15,25,35,45,55,65,75,85,95,105,115,135] :: [Double]
+      decPats = [0x1,0x2,0x3,0x4,0x5,0x6,0x7,0x8,0x9,0xA,0xB,0xC,0xF] :: [Int]
+      xDb b   = 19 + d b * 3   -- 直接バスのx座標 (bit 0-3)
+      xIb b   = 33 + d b * 3   -- 反転バスのx座標 (bit 0-3)
+      yIn b   = 10 + d b * 16  -- 入力ピンのy座標
+      yNot b  = 8  + d b * 16 + 1.5  -- NOTゲート中心y
+      -- 入力→NOTゲート
+      segsNot = [ (opBits!!b, [LayoutSeg 0 (yIn b) 10 (yNot b) cid])
+                | b <- [0..7] ]
+      -- 直接バス (bit 0-3): 入力ピン → 垂直バス
+      segsDirBus = [ (opBits!!b,
+                      [ LayoutSeg 0 (yIn b) (xDb b) (yIn b) cid
+                      , LayoutSeg (xDb b) (yIn b) (xDb b) 138 cid ])
+                   | b <- [0..3] ]
+      -- 反転バス (bit 0-3): NOTゲート出力 → 垂直バス
+      segsInvBus = [ (opInvs!!b,
+                      [ LayoutSeg 14 (yNot b) (xIb b) (yNot b) cid
+                      , LayoutSeg (xIb b) (yNot b) (xIb b) 138 cid ])
+                   | b <- [0..3] ]
+      -- バス → ANDゲート入力 (パターンに応じて直接/反転バスから)
+      segsAndIn = concat
+        [ [ let bit = (pat `div` (2^(b::Int))) `mod` 2
+                xb  = if bit==1 then xDb b else xIb b
+                wid = if bit==1 then opBits!!b else opInvs!!b
+            in (wid, [LayoutSeg xb (ay+1) 50 (ay+1) cid])
+          | b <- [0..3] ]
+        | (pat, ay) <- zip decPats andYs ]
+      -- ANDゲート → ORゲート接続 (i=ANDインデックス, oy=OR gate y)
+      aoIdxs = [ (0::Int,10::Double),(1,10),(2,10),(4,10),(5,10)
+               , (6,10),(7,10),(8,10),(9,10)
+               , (6,55),(8,55),(7,65),(8,65)
+               , (0,145),(1,145) ]
+      segsAndOr = [ (dw!!i, [ LayoutSeg 55 (andYs!!i+1.5) 68 (andYs!!i+1.5) cid
+                             , LayoutSeg 68 (andYs!!i+1.5) 68 (oy+1.5) cid
+                             , LayoutSeg 68 (oy+1.5) 130 (oy+1.5) cid ])
+                  | (i, oy) <- aoIdxs ]
+      -- ORゲート出力 → 出力ピン
+      segsOrOut = [ (cw!!0, [LayoutSeg 135 11.5 200 10 cid])
+                  , (cw!!3, [LayoutSeg 135 56.5 200 55 cid])
+                  , (cw!!4, [LayoutSeg 135 66.5 200 65 cid]) ]
+      -- ANDゲート → 出力ピン直結 (ctrl単入力, i=ANDインデックス, py=ピンy)
+      apIdxs = [ (2::Int,25::Double),(3,35),(5,75),(10,95),(11,105),(12,135) ]
+      segsAndPin = [ (dw!!i, [ LayoutSeg 55 (andYs!!i+1.5) 165 (andYs!!i+1.5) cid
+                              , LayoutSeg 165 (andYs!!i+1.5) 165 py cid
+                              , LayoutSeg 165 py 200 py cid ])
+                   | (i, py) <- apIdxs ]
+      allSegs = segsNot ++ segsDirBus ++ segsInvBus ++ segsAndIn
+             ++ segsAndOr ++ segsOrOut ++ segsAndPin
   let comp = LayoutComp cid "DECODER" name "Instruction Decoder" x y 200 160 "#fdcb6e"
-               [] invGates [] ins outs 0
+               [] allGates allSegs ins outs 0
   return (comp, refs)
 
 -- ──────────────────────────────────────────────
