@@ -9,8 +9,7 @@ module CPU.Components
   ) where
 
 import Control.Monad (forM, foldM)
-import Control.Monad.State.Strict (get, put)
-import Data.List (foldl')
+import Control.Monad.State.Strict (get)
 
 import Circuit (GateType(..), Gate(..))
 import Builder
@@ -56,18 +55,12 @@ data LayoutComp = LayoutComp
   } deriving Show
 
 -- ゲートを追加し LayoutGate と出力ワイヤIDを返す
+-- ゲートID (lgId) には出力ワイヤIDを使用 (ワイヤIDは全体でユニーク)
 lgate :: String -> String -> Double -> Double -> Double -> Double -> [Int]
       -> Build (LayoutGate, Int)
 lgate typ name x y w h ins = do
-  s <- get
-  let gid = bsGateNext s
-      out = bsWireNext s
-      g   = Gate (readGType typ) ins out
-  put s { bsGateNext = gid + 1
-        , bsWireNext = out + 1
-        , bsGates    = bsGates s ++ [g]
-        }
-  return (LayoutGate gid typ name x y w h ins out, out)
+  out <- addGate (readGType typ) ins
+  return (LayoutGate out typ name x y w h ins out, out)
 
 readGType :: String -> GateType
 readGType "AND"  = AND
@@ -94,10 +87,8 @@ buildSRLatch name x y wSb wRb = do
   wQb <- freshWire
   addGateFixed NAND [wSb, wQb] wQ
   addGateFixed NAND [wRb, wQ]  wQb
-  s <- get
-  let gid = bsGateNext s - 2
-      lg1 = LayoutGate gid     "NAND" (name++"_n1") 6 1 5 4 [wSb,wQb] wQ
-      lg2 = LayoutGate (gid+1) "NAND" (name++"_n2") 6 8 5 4 [wRb,wQ]  wQb
+  let lg1 = LayoutGate wQ  "NAND" (name++"_n1") 6 1 5 4 [wSb,wQb] wQ
+      lg2 = LayoutGate wQb "NAND" (name++"_n2") 6 8 5 4 [wRb,wQ]  wQb
       segs = [ (wSb,  [LayoutSeg 0 3 6 3 cid])
              , (wRb,  [LayoutSeg 0 11 6 10 cid])
              , (wQ,   [LayoutSeg 11 3 20 3 cid

@@ -26,5 +26,6 @@ executable computersystem
     , SimpleJSON
     , Serialize
     , CPU.Types
+    , CPU.Netlist
     , CPU.Components
     , CPU.Step

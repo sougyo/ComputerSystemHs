@@ -23,7 +23,6 @@ import Circuit (Gate(..), GateType(..))
 
 data BuildState = BuildState
   { bsWireNext :: !Int
-  , bsGateNext :: !Int
   , bsCompNext :: !Int
   , bsGates    :: ![Gate]
   , bsWireNames:: !(IntMap String)
@@ -32,7 +31,7 @@ data BuildState = BuildState
 type Build a = State BuildState a
 
 runBuild :: Build a -> (a, BuildState)
-runBuild b = runState b (BuildState 0 0 0 [] IM.empty)
+runBuild b = runState b (BuildState 0 0 [] IM.empty)
 
 -- 新しいワイヤIDを払い出す
 freshWire :: Build Int
