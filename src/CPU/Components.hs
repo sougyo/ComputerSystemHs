@@ -14,6 +14,15 @@ import Control.Monad.State.Strict (get)
 import Circuit (GateType(..), Gate(..))
 import Builder
 import CPU.Types
+import CPU.Netlist
+  ( SRLatchNet(..), netSRLatch
+  , DLatchNet(..), netDLatch
+  , DFFNet(..), netDFF
+  , HalfAdderNet(..), netHalfAdder
+  , FullAdderNet(..), netFullAdder
+  , netBitwise8, netNot8
+  , Mux2Net(..), netMux2
+  )
 
 -- ──────────────────────────────────────────────
 -- レイアウト型
@@ -82,11 +91,14 @@ d = fromIntegral
 buildSRLatch :: String -> Double -> Double -> Int -> Int
              -> Build (LayoutComp, Int, Int)
 buildSRLatch name x y wSb wRb = do
+  net <- netSRLatch wSb wRb
+  comp <- layoutSRLatch name x y wSb wRb net
+  return (comp, srnQ net, srnQb net)
+
+layoutSRLatch :: String -> Double -> Double -> Int -> Int -> SRLatchNet
+              -> Build LayoutComp
+layoutSRLatch name x y wSb wRb (SRLatchNet wQ wQb) = do
   cid <- freshComp
-  wQ  <- freshWire
-  wQb <- freshWire
-  addGateFixed NAND [wSb, wQb] wQ
-  addGateFixed NAND [wRb, wQ]  wQb
   let lg1 = LayoutGate wQ  "NAND" (name++"_n1") 6 1 5 4 [wSb,wQb] wQ
       lg2 = LayoutGate wQb "NAND" (name++"_n2") 6 8 5 4 [wRb,wQ]  wQb
       segs = [ (wSb,  [LayoutSeg 0 3 6 3 cid])
@@ -96,12 +108,11 @@ buildSRLatch name x y wSb wRb = do
              , (wQb,  [LayoutSeg 11 10 20 11 cid
                       ,LayoutSeg 13 10 13 3 cid, LayoutSeg 13 3 6 5 cid])
              ]
-  let comp = LayoutComp cid "SR_LATCH" name name x y 20 14 "#00cec9"
-               [] [lg1,lg2] segs
-               [("Sb", LayoutPin wSb 0 3), ("Rb", LayoutPin wRb 0 11)]
-               [("Q",  LayoutPin wQ  20 3), ("Qb", LayoutPin wQb 20 11)]
-               0
-  return (comp, wQ, wQb)
+  return $ LayoutComp cid "SR_LATCH" name name x y 20 14 "#00cec9"
+             [] [lg1,lg2] segs
+             [("Sb", LayoutPin wSb 0 3), ("Rb", LayoutPin wRb 0 11)]
+             [("Q",  LayoutPin wQ  20 3), ("Qb", LayoutPin wQb 20 11)]
+             0
 
 -- ──────────────────────────────────────────────
 -- D ラッチ (EN=1で透過)
@@ -109,11 +120,20 @@ buildSRLatch name x y wSb wRb = do
 buildDLatch :: String -> Double -> Double -> Int -> Int
             -> Build (LayoutComp, Int, Int)
 buildDLatch name x y wD wEN = do
+  net <- netDLatch wD wEN
+  comp <- layoutDLatch name x y wD wEN net
+  return (comp, dlnQ net, dlnQb net)
+
+layoutDLatch :: String -> Double -> Double -> Int -> Int -> DLatchNet
+             -> Build LayoutComp
+layoutDLatch name x y wD wEN dln = do
   cid <- freshComp
-  (lgNotD, wDb) <- lgate "NOT"  (name++"_notD") 3  2  4 3 [wD]
-  (lgN1,   wSb) <- lgate "NAND" (name++"_g1")   12 1  5 4 [wD, wEN]
-  (lgN2,   wRb) <- lgate "NAND" (name++"_g2")   12 14 5 4 [wDb, wEN]
-  (sr, wQ, wQb) <- buildSRLatch (name++"_sr") 22 3 wSb wRb
+  let wDb = dlnDb dln; wSb = dlnSb dln; wRb = dlnRb dln
+      wQ  = dlnQ  dln; wQb = dlnQb dln
+      lgNotD = LayoutGate wDb "NOT"  (name++"_notD") 3  2  4 3 [wD]        wDb
+      lgN1   = LayoutGate wSb "NAND" (name++"_g1")   12 1  5 4 [wD,  wEN]  wSb
+      lgN2   = LayoutGate wRb "NAND" (name++"_g2")   12 14 5 4 [wDb, wEN]  wRb
+  sr <- layoutSRLatch (name++"_sr") 22 3 wSb wRb (SRLatchNet wQ wQb)
   let segs = [ (wD,  [LayoutSeg 0 4 10 4 cid, LayoutSeg 3 4 3 3.5 cid
                      ,LayoutSeg 10 4 10 2.33 cid, LayoutSeg 10 2.33 12 2.33 cid])
              , (wEN, [LayoutSeg 0 18 11 18 cid, LayoutSeg 11 3.67 11 18 cid
@@ -125,12 +145,11 @@ buildDLatch name x y wD wEN = do
              , (wRb, [LayoutSeg 17 16 20 16 cid, LayoutSeg 20 16 20 14 cid
                      ,LayoutSeg 20 14 22 14 cid])
              ]
-  let comp = LayoutComp cid "D_LATCH" name name x y 44 22 "#00b894"
-               [sr] [lgNotD, lgN1, lgN2] segs
-               [("D",  LayoutPin wD 0 4), ("EN", LayoutPin wEN 0 18)]
-               [("Q",  LayoutPin wQ 44 6), ("Qb", LayoutPin wQb 44 16)]
-               0
-  return (comp, wQ, wQb)
+  return $ LayoutComp cid "D_LATCH" name name x y 44 22 "#00b894"
+             [sr] [lgNotD, lgN1, lgN2] segs
+             [("D",  LayoutPin wD 0 4), ("EN", LayoutPin wEN 0 18)]
+             [("Q",  LayoutPin wQ 44 6), ("Qb", LayoutPin wQb 44 16)]
+             0
 
 -- ──────────────────────────────────────────────
 -- D フリップフロップ (マスタースレーブ)
@@ -138,10 +157,21 @@ buildDLatch name x y wD wEN = do
 buildDFF :: String -> Double -> Double -> Int -> Int
          -> Build (LayoutComp, Int, Int)
 buildDFF name x y wD wCLK = do
+  net <- netDFF wD wCLK
+  comp <- layoutDFF name x y wD wCLK net
+  return (comp, dffnQ net, dffnQb net)
+
+layoutDFF :: String -> Double -> Double -> Int -> Int -> DFFNet
+          -> Build LayoutComp
+layoutDFF name x y wD wCLK dfn = do
   cid <- freshComp
-  (lgNotClk, wClkBar) <- lgate "NOT" (name++"_notclk") 49 12 4 4 [wCLK]
-  (master, wMQ, _)    <- buildDLatch (name++"_master") 5  3 wD wCLK
-  (slave,  wQ,  wQb)  <- buildDLatch (name++"_slave")  53 3 wMQ wClkBar
+  let wClkBar = dffnClkb dfn
+      wMQ     = dlnQ (dffnMaster dfn)
+      wQ      = dffnQ dfn
+      wQb     = dffnQb dfn
+      lgNotClk = LayoutGate wClkBar "NOT" (name++"_notclk") 49 12 4 4 [wCLK] wClkBar
+  master <- layoutDLatch (name++"_master") 5  3 wD  wCLK    (dffnMaster dfn)
+  slave  <- layoutDLatch (name++"_slave")  53 3 wMQ wClkBar (dffnSlave  dfn)
   let segs = [ (wD,      [LayoutSeg 0 4 5 4 cid, LayoutSeg 5 4 5 7 cid])
              , (wCLK,    [LayoutSeg 0 22 3 22 cid, LayoutSeg 3 22 3 14 cid
                          ,LayoutSeg 3 21 5 21 cid, LayoutSeg 3 14 49 14 cid])
@@ -153,12 +183,11 @@ buildDFF name x y wD wCLK = do
                          ,LayoutSeg 99 6 100 6 cid])
              , (wQb,     [LayoutSeg 97 19 100 19 cid])
              ]
-  let comp = LayoutComp cid "DFF" name name x y 100 28 "#00cec9"
-               [master, slave] [lgNotClk] segs
-               [("D", LayoutPin wD 0 4), ("CLK", LayoutPin wCLK 0 22)]
-               [("Q", LayoutPin wQ 100 6), ("Qb", LayoutPin wQb 100 19)]
-               120
-  return (comp, wQ, wQb)
+  return $ LayoutComp cid "DFF" name name x y 100 28 "#00cec9"
+             [master, slave] [lgNotClk] segs
+             [("D", LayoutPin wD 0 4), ("CLK", LayoutPin wCLK 0 22)]
+             [("Q", LayoutPin wQ 100 6), ("Qb", LayoutPin wQb 100 19)]
+             120
 
 -- ──────────────────────────────────────────────
 -- 8ビットレジスタ (8個のDFF)
@@ -185,20 +214,27 @@ buildRegister8 name x y wDs wCLK = do
 buildHalfAdder :: String -> Double -> Double -> Int -> Int
                -> Build (LayoutComp, Int, Int)
 buildHalfAdder name x y wA wB = do
+  net <- netHalfAdder wA wB
+  comp <- layoutHalfAdder name x y wA wB net
+  return (comp, hanSum net, hanCarry net)
+
+-- ハーフアダーのレイアウトのみ組み立てる (ゲートは net で登録済み)
+layoutHalfAdder :: String -> Double -> Double -> Int -> Int -> HalfAdderNet
+                -> Build LayoutComp
+layoutHalfAdder name x y wA wB (HalfAdderNet wSum wCarry) = do
   cid <- freshComp
-  (lgXor, wSum)   <- lgate "XOR" (name++"_xor") 10 1 6 4 [wA, wB]
-  (lgAnd, wCarry) <- lgate "AND" (name++"_and") 10 9 6 4 [wA, wB]
-  let segs = [ (wA,     [LayoutSeg 0 4 10 3 cid, LayoutSeg 0 4 10 11 cid])
-             , (wB,     [LayoutSeg 0 12 10 5 cid, LayoutSeg 0 12 10 13 cid])
-             , (wSum,   [LayoutSeg 16 3 24 4 cid])
-             , (wCarry, [LayoutSeg 16 11 24 12 cid])
-             ]
-  let comp = LayoutComp cid "HALF_ADDER" name name x y 24 16 "#6c5ce7"
-               [] [lgXor, lgAnd] segs
-               [("A", LayoutPin wA 0 4), ("B", LayoutPin wB 0 12)]
-               [("Sum", LayoutPin wSum 24 4), ("Carry", LayoutPin wCarry 24 12)]
-               0
-  return (comp, wSum, wCarry)
+  let lgXor = LayoutGate wSum   "XOR" (name++"_xor") 10 1 6 4 [wA, wB] wSum
+      lgAnd = LayoutGate wCarry "AND" (name++"_and") 10 9 6 4 [wA, wB] wCarry
+      segs  = [ (wA,     [LayoutSeg 0 4 10 3 cid, LayoutSeg 0 4 10 11 cid])
+              , (wB,     [LayoutSeg 0 12 10 5 cid, LayoutSeg 0 12 10 13 cid])
+              , (wSum,   [LayoutSeg 16 3 24 4 cid])
+              , (wCarry, [LayoutSeg 16 11 24 12 cid])
+              ]
+  return $ LayoutComp cid "HALF_ADDER" name name x y 24 16 "#6c5ce7"
+             [] [lgXor, lgAnd] segs
+             [("A", LayoutPin wA 0 4), ("B", LayoutPin wB 0 12)]
+             [("Sum", LayoutPin wSum 24 4), ("Carry", LayoutPin wCarry 24 12)]
+             0
 
 -- ──────────────────────────────────────────────
 -- フルアダー: HA×2 + OR
@@ -207,9 +243,10 @@ buildFullAdder :: String -> Double -> Double -> Int -> Int -> Int
                -> Build (LayoutComp, Int, Int)
 buildFullAdder name x y wA wB wCin = do
   cid <- freshComp
-  (ha1, ha1Sum, ha1Carry) <- buildHalfAdder (name++"_HA1") 5 2  wA wB
-  (ha2, ha2Sum, ha2Carry) <- buildHalfAdder (name++"_HA2") 5 20 ha1Sum wCin
-  (lgOr, wCout) <- lgate "OR" (name++"_or") 38 16 5 3 [ha1Carry, ha2Carry]
+  FullAdderNet wSum wCout ha1Sum ha1Carry ha2Carry <- netFullAdder wA wB wCin
+  ha1 <- layoutHalfAdder (name++"_HA1") 5  2  wA     wB   (HalfAdderNet ha1Sum ha1Carry)
+  ha2 <- layoutHalfAdder (name++"_HA2") 5  20 ha1Sum wCin (HalfAdderNet wSum   ha2Carry)
+  let lgOr = LayoutGate wCout "OR" (name++"_or") 38 16 5 3 [ha1Carry, ha2Carry] wCout
   let segs = [ (wA,       [LayoutSeg 0 8 5 6 cid])
              , (wB,       [LayoutSeg 0 16 5 14 cid])
              , (wCin,     [LayoutSeg 0 32 5 32 cid])
@@ -217,14 +254,14 @@ buildFullAdder name x y wA wB wCin = do
              , (ha1Carry, [LayoutSeg 29 14 38 18 cid])
              , (ha2Carry, [LayoutSeg 29 32 38 20 cid])
              , (wCout,    [LayoutSeg 44 18 55 18 cid])
-             , (ha2Sum,   [LayoutSeg 29 24 55 8 cid])
+             , (wSum,   [LayoutSeg 29 24 55 8 cid])
              ]
   let comp = LayoutComp cid "FULL_ADDER" name name x y 55 40 "#a29bfe"
                [ha1, ha2] [lgOr] segs
                [("A",LayoutPin wA 0 8),("B",LayoutPin wB 0 16),("Cin",LayoutPin wCin 0 32)]
-               [("Sum",LayoutPin ha2Sum 55 8),("Cout",LayoutPin wCout 55 18)]
+               [("Sum",LayoutPin wSum 55 8),("Cout",LayoutPin wCout 55 18)]
                0
-  return (comp, ha2Sum, wCout)
+  return (comp, wSum, wCout)
 
 -- ──────────────────────────────────────────────
 -- 8ビットリップルキャリー加算器
@@ -261,11 +298,10 @@ buildBitwise8 :: String -> String -> String -> Double -> Double -> [Int] -> [Int
               -> Build (LayoutComp, [Int])
 buildBitwise8 name typ color x y wAs wBs = do
   cid <- freshComp
-  results <- forM (zip3 wAs wBs [0..7]) $ \(wA, wB, i) -> do
-    (lg, wR) <- lgate typ (name++"_"++typ++show (i::Int))
-                          (5+d i*58) 5 6 3 [wA, wB]
-    return (lg, wR)
-  let (lgs, wRs) = unzip results
+  wRs <- netBitwise8 (readGType typ) wAs wBs
+  let lgs = [ LayoutGate wR typ (name++"_"++typ++show (i::Int))
+                (5+d i*58) 5 6 3 [wA, wB] wR
+            | (wR, wA, wB, i) <- zip4 wRs wAs wBs [0..7] ]
       segs = concatMap (\(wA,wB,wR,i) ->
                [(wA, [LayoutSeg (5+d i*58) 0 (5+d i*58) 7 cid])
                ,(wB, [LayoutSeg (5+d i*58+3) 0 (5+d i*58+3) 9 cid])
@@ -290,10 +326,10 @@ zip4 _ _ _ _ = []
 buildNot8 :: String -> Double -> Double -> [Int] -> Build (LayoutComp, [Int])
 buildNot8 name x y wAs = do
   cid <- freshComp
-  results <- forM (zip wAs [0..7]) $ \(wA, i) -> do
-    (lg, wR) <- lgate "NOT" (name++"_NOT"++show (i::Int)) (5+d i*58) 5 6 3 [wA]
-    return (lg, wR)
-  let (lgs, wRs) = unzip results
+  wRs <- netNot8 wAs
+  let lgs = [ LayoutGate wR "NOT" (name++"_NOT"++show (i::Int))
+                (5+d i*58) 5 6 3 [wA] wR
+            | (wR, wA, i) <- zip3 wRs wAs [0..7] ]
       ins  = zipWith (\wA i -> ("A"++show (i::Int), LayoutPin wA (5+d i*58) 0)) wAs [0..7]
       outs = zipWith (\wR i -> ("R"++show (i::Int), LayoutPin wR (11+d i*58) 7)) wRs [0..7]
   let comp = LayoutComp cid "NOT_8BIT" name name x y 480 18 "#d63031"
@@ -307,11 +343,12 @@ buildMux2 :: String -> Double -> Double -> Int -> Int -> Int
           -> Build (LayoutComp, Int)
 buildMux2 name x y wA wB wSel = do
   cid <- freshComp
-  (lgNot,  wNotSel) <- lgate "NOT" (name++"_not")  3  1 4 3 [wSel]
-  (lgAnd1, wA1)     <- lgate "AND" (name++"_and1") 10 0 6 3 [wA, wNotSel]
-  (lgAnd2, wA2)     <- lgate "AND" (name++"_and2") 10 8 6 3 [wB, wSel]
-  (lgOr,   wOut)    <- lgate "OR"  (name++"_or")   18 4 6 3 [wA1, wA2]
-  let comp = LayoutComp cid "MUX2" name name x y 24 18 "#e84393"
+  Mux2Net wOut wNotSel wA1 wA2 <- netMux2 wA wB wSel
+  let lgNot  = LayoutGate wNotSel "NOT" (name++"_not")  3  1 4 3 [wSel]        wNotSel
+      lgAnd1 = LayoutGate wA1     "AND" (name++"_and1") 10 0 6 3 [wA, wNotSel] wA1
+      lgAnd2 = LayoutGate wA2     "AND" (name++"_and2") 10 8 6 3 [wB, wSel]    wA2
+      lgOr   = LayoutGate wOut    "OR"  (name++"_or")   18 4 6 3 [wA1, wA2]    wOut
+      comp = LayoutComp cid "MUX2" name name x y 24 18 "#e84393"
                [] [lgNot, lgAnd1, lgAnd2, lgOr] []
                [("A",LayoutPin wA 0 2),("B",LayoutPin wB 0 10),("Sel",LayoutPin wSel 0 16)]
                [("Out", LayoutPin wOut 24 6)]

@@ -21,7 +21,7 @@ module CPU.Netlist
   , FullAdderNet(..), netFullAdder
   , netAdder8
     -- MUX
-  , netMux2
+  , Mux2Net(..), netMux2
   , netMux4_8bit
     -- ビット演算
   , netBitwise8
@@ -60,7 +60,14 @@ netSRLatch wSb wRb = do
 -- EN=High の間は D の値がそのまま Q に伝わる (透過モード)。
 -- EN=Low になると直前の値を保持する (ラッチモード)。
 -- 内部は NAND ベースの SR ラッチで構成。
-data DLatchNet = DLatchNet { dlnQ :: !Int, dlnQb :: !Int }
+-- dlnDb/dlnSb/dlnRb はレイアウト層での LayoutGate 構築に使用する。
+data DLatchNet = DLatchNet
+  { dlnQ  :: !Int
+  , dlnQb :: !Int
+  , dlnDb :: !Int   -- NOT(D) の出力
+  , dlnSb :: !Int   -- NAND(D,  EN) の出力 → SR ラッチの Sb 入力
+  , dlnRb :: !Int   -- NAND(Db, EN) の出力 → SR ラッチの Rb 入力
+  }
 
 netDLatch :: Int -> Int -> Build DLatchNet
 netDLatch wD wEN = do
@@ -68,7 +75,7 @@ netDLatch wD wEN = do
   wSb <- addGate NAND [wD,  wEN]     -- セット信号 (D=1 かつ EN=1 でアクティブ)
   wRb <- addGate NAND [wDb, wEN]     -- リセット信号 (D=0 かつ EN=1 でアクティブ)
   SRLatchNet wQ wQb <- netSRLatch wSb wRb
-  return DLatchNet { dlnQ = wQ, dlnQb = wQb }
+  return DLatchNet { dlnQ = wQ, dlnQb = wQb, dlnDb = wDb, dlnSb = wSb, dlnRb = wRb }
 
 -- ──────────────────────────────────────────────
 -- D フリップフロップ (マスタースレーブ型)
@@ -76,14 +83,26 @@ netDLatch wD wEN = do
 -- CLK の立ち上がりエッジで D の値をキャプチャし Q に出力する。
 -- マスターラッチ (CLK=High で透過) とスレーブラッチ (CLK=Low で透過) の
 -- 2段直列接続で、エッジトリガ動作を実現する。
-data DFFNet = DFFNet { dffnQ :: !Int, dffnQb :: !Int }
+-- dffnMaster/dffnSlave にはレイアウト構築に必要な中間ワイヤが含まれる。
+data DFFNet = DFFNet
+  { dffnQ      :: !Int
+  , dffnQb     :: !Int
+  , dffnClkb   :: !Int        -- NOT(CLK) の出力
+  , dffnMaster :: !DLatchNet  -- マスターラッチの全ワイヤ (レイアウト用)
+  , dffnSlave  :: !DLatchNet  -- スレーブラッチの全ワイヤ (レイアウト用)
+  }
 
 netDFF :: Int -> Int -> Build DFFNet
 netDFF wD wCLK = do
-  wClkb             <- addGate NOT [wCLK]
-  DLatchNet wMQ _   <- netDLatch wD  wCLK    -- マスター: CLK=High で D を取り込む
-  DLatchNet wQ  wQb <- netDLatch wMQ wClkb   -- スレーブ: CLK=Low  で出力を確定
-  return DFFNet { dffnQ = wQ, dffnQb = wQb }
+  wClkb  <- addGate NOT [wCLK]
+  master <- netDLatch wD          wCLK    -- マスター: CLK=High で D を取り込む
+  slave  <- netDLatch (dlnQ master) wClkb -- スレーブ: CLK=Low  で出力を確定
+  return DFFNet
+    { dffnQ = dlnQ slave, dffnQb = dlnQb slave
+    , dffnClkb   = wClkb
+    , dffnMaster = master
+    , dffnSlave  = slave
+    }
 
 -- ──────────────────────────────────────────────
 -- 8ビットレジスタ
@@ -112,14 +131,24 @@ netHalfAdder wA wB = do
 -- Sum  = A XOR B XOR Cin   (3入力の排他的論理和)
 -- Cout = 多数決(A, B, Cin)  (2つ以上が 1 なら桁上がり)
 -- ハーフアダー2つと OR ゲート1つで構成。
-data FullAdderNet = FullAdderNet { fanSum :: !Int, fanCout :: !Int }
+-- 中間ワイヤはレイアウト層での LayoutComp 組み立てに使用する。
+data FullAdderNet = FullAdderNet
+  { fanSum  :: !Int   -- 最終和出力
+  , fanCout :: !Int   -- 桁上がり出力
+  , fanHA1Sum :: !Int -- 第1段ハーフアダーの和 (第2段への入力)
+  , fanHA1C   :: !Int -- 第1段ハーフアダーのキャリー
+  , fanHA2C   :: !Int -- 第2段ハーフアダーのキャリー
+  }
 
 netFullAdder :: Int -> Int -> Int -> Build FullAdderNet
 netFullAdder wA wB wCin = do
-  HalfAdderNet ha1Sum ha1Carry <- netHalfAdder wA   wB    -- 第1段: A+B
+  HalfAdderNet ha1Sum ha1Carry <- netHalfAdder wA     wB   -- 第1段: A+B
   HalfAdderNet wSum   ha2Carry <- netHalfAdder ha1Sum wCin -- 第2段: (A+B)+Cin
   wCout <- addGate OR [ha1Carry, ha2Carry]
-  return FullAdderNet { fanSum = wSum, fanCout = wCout }
+  return FullAdderNet
+    { fanSum = wSum, fanCout = wCout
+    , fanHA1Sum = ha1Sum, fanHA1C = ha1Carry, fanHA2C = ha2Carry
+    }
 
 -- ──────────────────────────────────────────────
 -- 8ビットリップルキャリー加算器
@@ -132,20 +161,29 @@ netAdder8 wAs wBs wCin = do
   return (reverse revSums, cout)
   where
     addBit (sums, cin) (wA, wB) = do
-      FullAdderNet s cout <- netFullAdder wA wB cin
-      return (s : sums, cout)
+      fa <- netFullAdder wA wB cin
+      return (fanSum fa : sums, fanCout fa)
 
 -- ──────────────────────────────────────────────
 -- 1ビット 2-to-1 MUX
 -- ──────────────────────────────────────────────
 -- Sel=0 のとき A を、Sel=1 のとき B を出力する。
 -- Out = (A AND NOT Sel) OR (B AND Sel)
-netMux2 :: Int -> Int -> Int -> Build Int
+-- 中間ワイヤも返すことで、レイアウト層が LayoutGate を構築できる。
+data Mux2Net = Mux2Net
+  { m2nOut    :: !Int   -- 選択結果出力
+  , m2nNotSel :: !Int   -- NOT Sel
+  , m2nPassA  :: !Int   -- A AND NOT Sel
+  , m2nPassB  :: !Int   -- B AND Sel
+  }
+
+netMux2 :: Int -> Int -> Int -> Build Mux2Net
 netMux2 wA wB wSel = do
   wNotSel <- addGate NOT [wSel]
   wPA     <- addGate AND [wA, wNotSel]
   wPB     <- addGate AND [wB, wSel]
-  addGate OR [wPA, wPB]
+  wOut    <- addGate OR  [wPA, wPB]
+  return Mux2Net { m2nOut = wOut, m2nNotSel = wNotSel, m2nPassA = wPA, m2nPassB = wPB }
 
 -- ──────────────────────────────────────────────
 -- 8ビット 4-to-1 MUX
@@ -157,10 +195,11 @@ netMux4_8bit :: [Int] -> [Int] -> [Int] -> [Int] -> Int -> Int -> Build [Int]
 netMux4_8bit wI0s wI1s wI2s wI3s wSel0 wSel1 =
   mapM selectBit (zip4n wI0s wI1s wI2s wI3s)
   where
+    mux2out a b s = m2nOut <$> netMux2 a b s
     selectBit (w0, w1, w2, w3) = do
-      wAB <- netMux2 w0 w1 wSel0   -- I0/I1 から Sel0 で選択
-      wCD <- netMux2 w2 w3 wSel0   -- I2/I3 から Sel0 で選択
-      netMux2 wAB wCD wSel1         -- 上段結果から Sel1 で最終選択
+      wAB <- mux2out w0 w1 wSel0   -- I0/I1 から Sel0 で選択
+      wCD <- mux2out w2 w3 wSel0   -- I2/I3 から Sel0 で選択
+      mux2out wAB wCD wSel1         -- 上段結果から Sel1 で最終選択
 
 zip4n :: [a] -> [b] -> [c] -> [d] -> [(a, b, c, d)]
 zip4n (a:as) (b:bs) (c:cs) (d:ds) = (a, b, c, d) : zip4n as bs cs ds
