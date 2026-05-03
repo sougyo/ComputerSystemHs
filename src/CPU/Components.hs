@@ -638,8 +638,10 @@ buildCPU = fst $ runBuild go
     aluBIns  <- mapM (\_ -> freshWire) [0..7::Int]
     pcNexts  <- mapM (\_ -> freshWire) [0..7::Int]
     pcTargets<- mapM (\_ -> freshWire) [0..7::Int]
-    (regA, regAOuts) <- buildRegister8 "RegA" 200 280 regADins wCLK
-    (regB, regBOuts) <- buildRegister8 "RegB" 320 280 regBDins wCLK
+    -- 上段: PC/MEM が y=310 まで、IR_H/IR_L が y=290 まで達するため
+    -- 下段は y=330 から開始して重なりを回避 (上段との最低20単位ギャップ)
+    (regA, regAOuts) <- buildRegister8 "RegA" 200 330 regADins wCLK
+    (regB, regBOuts) <- buildRegister8 "RegB" 320 330 regBDins wCLK
     (ir,   irOuts)   <- buildRegister8 "IR_H" 700 50  irDins   wCLK
     (irL,  irLOuts)  <- buildRegister8 "IR_L" 820 50  irLDins  wCLK
     (dec,  decRefs)  <- buildDecoder   "DEC"  450 50  decOpIns
@@ -647,7 +649,7 @@ buildCPU = fst $ runBuild go
                      <- buildMemory "MEM" 200 50
     (pc, pcOuts)     <- buildPC "PC" 50 50 pcNexts pcTargets wBranch wCLK
     (alu, aluOuts, wZero, wCout)
-                     <- buildALU "ALU" 450 280 aluAIns aluBIns wSel0 wSel1 wSubMode
+                     <- buildALU "ALU" 450 330 aluAIns aluBIns wSel0 wSel1 wSubMode
     s <- get
     let refs = CPURefs
           { crRegAIns    = regADins,  crRegAOuts   = regAOuts
