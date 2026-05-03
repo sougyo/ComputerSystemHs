@@ -4,6 +4,8 @@ module CPU.Types
   , DecoderRefs(..)
   , CPUState(..)
   , initialCPUState
+  , displayBase
+  , displaySize
   ) where
 
 import Data.Word (Word8)
@@ -24,6 +26,13 @@ data DecoderRefs = DecoderRefs
   , drLoadImm  :: !Int
   , drRegDstB  :: !Int
   } deriving Show
+
+-- ディスプレイ MMIO 定数 (5×5 ピクセル)
+displayBase :: Int
+displayBase = 0xE0   -- 先頭アドレス (pixel(0,0))
+
+displaySize :: Int
+displaySize = 25     -- 5×5 = 25 ピクセル
 
 data CPURefs = CPURefs
   { crRegAIns    :: ![Int]
@@ -47,8 +56,9 @@ data CPURefs = CPURefs
   , crALUCout    :: !Int
   , crMemAddrIns :: ![Int]
   , crMemDatOuts :: ![Int]
-  , crMemRead    :: !Int
-  , crMemWrite   :: !Int
+  , crMemRead       :: !Int
+  , crMemWrite      :: !Int
+  , crDisplayPixels :: ![Int]   -- 25本のピクセルワイヤ (アドレス 0xE0..0xF8 に対応)
   } deriving Show
 
 -- メモリ: 256バイトの配列

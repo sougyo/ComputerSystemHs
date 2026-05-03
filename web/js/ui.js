@@ -8,7 +8,25 @@ const App = (() => {
     let running   = false;
     let runTimer  = null;
 
+    // ディスプレイ MMIO アドレス: pixel(row, col) = mem[0xE0 + row*5 + col]
+    // row 0: 0xE0-0xE4 / row 1: 0xE5-0xE9 / row 2: 0xEA-0xEE
+    // row 3: 0xEF-0xF3 / row 4: 0xF4-0xF8
+    const DISPLAY_BASE = 0xE0;
+
     const PROGRAMS = {
+        display: `; Display demo: draw a plus sign on the 5x5 screen
+; pixel(row,col) = mem[0xE0 + row*5 + col]  (non-zero = lit)
+LOAD_A 1
+STORE_A 0xE2  ; row0 col2
+STORE_A 0xE7  ; row1 col2
+STORE_A 0xEA  ; row2 col0
+STORE_A 0xEB  ; row2 col1
+STORE_A 0xEC  ; row2 col2
+STORE_A 0xED  ; row2 col3
+STORE_A 0xEE  ; row2 col4
+STORE_A 0xF1  ; row3 col2
+STORE_A 0xF6  ; row4 col2
+HLT`,
         add: `; Addition: A = 25 + 17 = 42
 LOAD_A 25
 LOAD_B 17
@@ -174,6 +192,14 @@ HLT`,
             const bytes = mem.slice(i, i+8).map(b =>
                 (b||0).toString(16).padStart(2,'0')).join(' ');
             rows.push(`<div class="mem-row"><span class="mem-addr">${addr}</span> <span class="mem-bytes">${bytes}</span></div>`);
+        }
+        // ディスプレイ MMIO 領域 (0xE0-0xF8) を別セクションで表示
+        rows.push(`<div class="mem-row" style="margin-top:6px;opacity:0.6"><span class="mem-addr" style="color:#fdcb6e">DISP MMIO</span></div>`);
+        for (let r = 0; r < 5; r++) {
+            const base = DISPLAY_BASE + r * 5;
+            const addr = '0x' + base.toString(16).padStart(2,'0');
+            const bytes = Array.from({length:5}, (_,c) => ((mem[base+c]||0) ? '##' : '--')).join(' ');
+            rows.push(`<div class="mem-row"><span class="mem-addr" style="color:#fdcb6e">${addr}</span> <span class="mem-bytes" style="color:#fdcb6e">${bytes}</span></div>`);
         }
         el.innerHTML = rows.join('');
     }

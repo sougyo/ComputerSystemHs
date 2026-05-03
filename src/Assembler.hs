@@ -44,7 +44,9 @@ mnemonicToOpcode m = case m of
 readNum :: String -> Word8
 readNum s = case s of
   ('0':'x':hex) -> fromIntegral (hexToInt hex)
+  ('0':'X':hex) -> fromIntegral (hexToInt hex)  -- toUpper で大文字化された場合
   ('0':'b':bin) -> fromIntegral (binToInt bin)
+  ('0':'B':bin) -> fromIntegral (binToInt bin)
   dec           -> fromIntegral (read dec :: Int)
 
 hexToInt :: String -> Int

@@ -9,7 +9,7 @@ import qualified Data.IntMap.Strict as IM
 import Data.List (foldl')
 
 import Circuit
-import CPU.Types
+import CPU.Types (CPURefs(..), CPUState(..), initialCPUState, displayBase)
 
 -- ──────────────────────────────────────────────
 -- ワイヤ操作ヘルパー
@@ -91,6 +91,11 @@ stepCPU gates refs st
         $ driveWord8 (crIROuts   refs) opcode
         $ driveWord8 (crIRLOuts  refs) opernd vs2
 
+    -- ディスプレイピクセルワイヤ更新: MMIO アドレス 0xE0..0xF8 をワイヤに反映
+    vs4 = foldl' (\acc (wid, addr) ->
+                    IM.insert wid (newMem ! addr /= 0) acc)
+                  vs3 (zip (crDisplayPixels refs) [displayBase..])
+
     st' = st
       { csRegA      = newRegA
       , csRegB      = newRegB
@@ -102,7 +107,7 @@ stepCPU gates refs st
       , csFlagN     = newFlagN
       , csHalted    = newHalted
       , csMemory    = newMem
-      , csWires     = vs3
+      , csWires     = vs4
       }
 
 -- 命令実行の純粋部分

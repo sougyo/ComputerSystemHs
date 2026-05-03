@@ -14,6 +14,9 @@ import Control.Monad.State.Strict (get)
 import Circuit (GateType(..), Gate(..))
 import Builder
 import CPU.Types
+  ( displayBase, displaySize
+  , CPURefs(..), DecoderRefs(..), CPUState(..)
+  )
 import CPU.Netlist
   ( SRLatchNet(..), netSRLatch
   , DLatchNet(..), netDLatch
@@ -619,6 +622,28 @@ buildMemory name x y = do
   return (comp, addrIns, datIns, datOuts, wRead, wWrite)
 
 -- ──────────────────────────────────────────────
+-- ディスプレイ (5×5 MMIO: アドレス 0xE0-0xF8)
+-- ──────────────────────────────────────────────
+-- pixWires は外部 (stepCPU) からメモリ値を反映して駆動される仮想ワイヤ
+buildDisplay :: String -> Double -> Double -> [Int] -> Build LayoutComp
+buildDisplay name x y pixWires = do
+  cid <- freshComp
+  let cW = 6 :: Double; cH = 6 :: Double  -- ピクセルセルのサイズ
+      gap = 1 :: Double                   -- ピクセル間の隙間
+      sp  = 4 :: Double                   -- 左右パディング
+      tp  = 9 :: Double                   -- 上パディング (ラベル用)
+      n   = 5 :: Double                   -- グリッドの辺数
+      compW = sp + n*(cW+gap) - gap + sp  -- = 42
+      compH = tp + n*(cH+gap) - gap + sp  -- = 47
+      positions = [(r,c) | r <- [0..4::Int], c <- [0..4::Int]]
+      -- LayoutGate を視覚化用に直接生成 (addGate は呼ばない = 回路に登録しない)
+      lgs = [ LayoutGate w "BUF" (name++"_px"++show r++"_"++show c)
+                (sp + d c*(cW+gap)) (tp + d r*(cH+gap)) cW cH [] w
+            | (w,(r,c)) <- zip pixWires positions ]
+  return $ LayoutComp cid "DISPLAY" name "Display (5x5)" x y compW compH "#1a1a2e"
+             [] lgs [] [] [] 0
+
+-- ──────────────────────────────────────────────
 -- プログラムカウンタ
 -- ──────────────────────────────────────────────
 buildPC :: String -> Double -> Double -> [Int] -> [Int] -> Int -> Int
@@ -664,7 +689,9 @@ buildCPU = fst $ runBuild go
     aluBIns  <- mapM (\_ -> freshWire) [0..7::Int]
     pcNexts  <- mapM (\_ -> freshWire) [0..7::Int]
     pcTargets<- mapM (\_ -> freshWire) [0..7::Int]
-    -- 上段 (y=50): PC→IR_H→IR_L→DEC の命令フロー順に左から配置、MEM は右端
+    pixelWires <- mapM (\_ -> freshWire) [0..displaySize-1::Int]
+    -- 上段 (y=50): PC→IR_H→IR_L→DEC の命令フロー順に左から配置
+    --              MEM は右端 (x=670)、DISP は MEM の右 (x=850)
     -- 下段 (y=330): RegA/RegB/ALU を IR_H/IR_L/DEC と縦に揃える
     -- 上段最大高さ: PC/MEM h=260 → bottom=310、下段との最低20単位ギャップを確保
     (regA, regAOuts) <- buildRegister8 "RegA" 200 330 regADins wCLK
@@ -677,6 +704,7 @@ buildCPU = fst $ runBuild go
     (pc, pcOuts)     <- buildPC "PC" 50 50 pcNexts pcTargets wBranch wCLK
     (alu, aluOuts, wZero, wCout)
                      <- buildALU "ALU" 450 330 aluAIns aluBIns wSel0 wSel1 wSubMode
+    disp             <- buildDisplay "DISP" 850 50 pixelWires
     s <- get
     let refs = CPURefs
           { crRegAIns    = regADins,  crRegAOuts   = regAOuts
@@ -692,11 +720,12 @@ buildCPU = fst $ runBuild go
           , crALUCout    = wCout
           , crMemAddrIns = memAddrs,  crMemDatOuts = memDatOuts
           , crMemRead    = wMemRead,  crMemWrite   = wMemWrite
+          , crDisplayPixels = pixelWires
           }
     cid <- freshComp
     let cpu = LayoutComp cid "CPU" "CPU" "CPU" 0 0 1000 650 "#2d3436"
                 [regA{lcLabel="Register A"}, regB{lcLabel="Register B"}
                 ,ir{lcLabel="IR (Opcode)"}, irL{lcLabel="IR (Operand)"}
-                ,dec, mem, pc, alu]
+                ,dec, mem, pc, alu, disp]
                 [] [] [] [] 0
     return $ CPUBuildResult cpu (bsGates s) refs

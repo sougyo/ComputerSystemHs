@@ -89,6 +89,12 @@ class Renderer {
         const cy = absY + comp.y;
         const z  = this.zoom;
 
+        // DISPLAY コンポーネントは専用レンダラーで常時描画
+        if (comp.type === 'DISPLAY') {
+            this._drawDisplay(ctx, comp, cx, cy, z);
+            return;
+        }
+
         // コンポーネントのスクリーン幅が expandAt(px) 以上になったら展開
         // expandAt=0 は常に展開
         const screenW = comp.w * z;
@@ -187,6 +193,33 @@ class Renderer {
             ctx.lineTo(baseX + s.x2, baseY + s.y2);
         }
         ctx.stroke();
+    }
+
+    // ── ディスプレイ描画 ─────────────────────────
+    _drawDisplay(ctx, comp, cx, cy, z) {
+        // 外枠
+        ctx.strokeStyle = '#fdcb6e';
+        ctx.lineWidth = 1.5 / z;
+        ctx.strokeRect(cx, cy, comp.w, comp.h);
+
+        // ラベル
+        const labelSize = Math.max(3 / z, Math.min(comp.h * 0.18, 8 / z));
+        ctx.fillStyle = '#fdcb6e';
+        ctx.font = `bold ${labelSize}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillText(comp.label || comp.name, cx + comp.w / 2, cy + labelSize + 1 / z);
+        ctx.textAlign = 'left';
+
+        // ピクセルグリッド (ズームに関係なく常に描画)
+        for (const g of (comp.gates || [])) {
+            const val = this.wires[g.out] || 0;
+            const pulse = this.pulseWires.has(g.out);
+            ctx.fillStyle   = pulse ? '#ffff00' : (val ? '#00ff88' : '#0d1117');
+            ctx.strokeStyle = pulse ? '#ffff00' : (val ? '#00cc66' : '#2a2a3a');
+            ctx.lineWidth = 0.4 / z;
+            ctx.fillRect  (cx + g.x, cy + g.y, g.w, g.h);
+            ctx.strokeRect(cx + g.x, cy + g.y, g.w, g.h);
+        }
     }
 
     _drawGate(ctx, gate, baseX, baseY, z) {
