@@ -315,9 +315,9 @@ buildBitwise8 name typ color x y wAs wBs = do
                 (5+d i*58) 5 6 3 [wA, wB] wR
             | (wR, wA, wB, i) <- zip4 wRs wAs wBs [0..7] ]
       segs = concatMap (\(wA,wB,wR,i) ->
-               [(wA, [LayoutSeg (5+d i*58) 0 (5+d i*58) 7 cid])
-               ,(wB, [LayoutSeg (5+d i*58+3) 0 (5+d i*58+3) 9 cid])
-               ,(wR, [LayoutSeg (11+d i*58) 7 (11+d i*58) 20 cid])
+               [(wA, [LayoutSeg (5+d i*58) 0 (5+d i*58) 6 cid])
+               ,(wB, [LayoutSeg (5+d i*58+3) 0 (5+d i*58+3) 7 cid])
+               ,(wR, [LayoutSeg (11+d i*58) 8 (11+d i*58) 20 cid])
                ]) (zip4 wAs wBs wRs [0..7])
       ins  = concatMap (\(wA,wB,i) ->
                [("A"++show (i::Int), LayoutPin wA (5+d i*58) 0)
@@ -361,8 +361,30 @@ buildMux2 name x y wA wB wSel = do
       lgAnd1 = LayoutGate wA1     "AND" (name++"_and1") 10 4 6 3 [wA, wNotSel] wA1
       lgAnd2 = LayoutGate wA2     "AND" (name++"_and2") 10 12 6 3 [wB, wSel]   wA2
       lgOr   = LayoutGate wOut    "OR"  (name++"_or")   18 8 6 3 [wA1, wA2]    wOut
+      -- 各ゲートの入力y: h=3のゲートでは input1=gy+1, input2=gy+2, 出力y=gy+1.5
+      segs = [ (wA,      [ LayoutSeg  0  6   2  6  cid
+                         , LayoutSeg  2  6   2  5  cid
+                         , LayoutSeg  2  5  10  5  cid ])
+             , (wB,      [ LayoutSeg  0 14   2 14  cid
+                         , LayoutSeg  2 14   2 13  cid
+                         , LayoutSeg  2 13  10 13  cid ])
+             , (wSel,    [ LayoutSeg  0 20   1 20  cid
+                         , LayoutSeg  1  6.5  1 20  cid
+                         , LayoutSeg  1  6.5  3  6.5 cid
+                         , LayoutSeg  1 14  10 14  cid ])
+             , (wNotSel, [ LayoutSeg  7  6.5  8  6.5 cid
+                         , LayoutSeg  8  6.5  8  6  cid
+                         , LayoutSeg  8  6   10  6  cid ])
+             , (wA1,     [ LayoutSeg 16  5.5 17  5.5 cid
+                         , LayoutSeg 17  5.5 17  9  cid
+                         , LayoutSeg 17  9  18   9  cid ])
+             , (wA2,     [ LayoutSeg 16 13.5 17 13.5 cid
+                         , LayoutSeg 17 13.5 17 10  cid
+                         , LayoutSeg 17 10  18  10  cid ])
+             , (wOut,    [ LayoutSeg 24  9.5 24 10  cid ])
+             ]
       comp = LayoutComp cid "MUX2" name name x y 24 22 "#e84393"
-               [] [lgNot, lgAnd1, lgAnd2, lgOr] []
+               [] [lgNot, lgAnd1, lgAnd2, lgOr] segs
                [("A",LayoutPin wA 0 6),("B",LayoutPin wB 0 14),("Sel",LayoutPin wSel 0 20)]
                [("Out", LayoutPin wOut 24 10)]
                0
@@ -524,15 +546,19 @@ buildDecoder name x y opBits = do
       -- 入力→NOTゲート
       segsNot = [ (opBits!!b, [LayoutSeg 0 (yIn b) 10 (yNot b) cid])
                 | b <- [0..7] ]
-      -- 直接バス (bit 0-3): 入力ピン → 垂直バス
+      -- 直接バス (bit 0-3): 入力ピン → 垂直バス (最後の AND ゲート入力 y=136 で終端)
       segsDirBus = [ (opBits!!b,
                       [ LayoutSeg 0 (yIn b) (xDb b) (yIn b) cid
-                      , LayoutSeg (xDb b) (yIn b) (xDb b) 138 cid ])
+                      , LayoutSeg (xDb b) (yIn b) (xDb b) 136 cid ])
                    | b <- [0..3] ]
-      -- 反転バス (bit 0-3): NOTゲート出力 → 垂直バス
+      -- 反転バス (bit 0-3): NOTゲート出力 → 垂直バス (各ビットの最終接続点で終端)
+      -- bit0,1 の最終使用: 0xC (ay=115) → y=116
+      -- bit2 の最終使用:   0xB (ay=105) → y=106
+      -- bit3 の最終使用:   0x7 (ay= 65) → y= 66
+      invBusEnd = [116, 116, 106, 66] :: [Double]
       segsInvBus = [ (opInvs!!b,
                       [ LayoutSeg 14 (yNot b) (xIb b) (yNot b) cid
-                      , LayoutSeg (xIb b) (yNot b) (xIb b) 138 cid ])
+                      , LayoutSeg (xIb b) (yNot b) (xIb b) (invBusEnd!!b) cid ])
                    | b <- [0..3] ]
       -- バス → ANDゲート入力 (パターンに応じて直接/反転バスから)
       segsAndIn = concat
