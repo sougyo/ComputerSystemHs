@@ -356,14 +356,15 @@ buildMux2 :: String -> Double -> Double -> Int -> Int -> Int
 buildMux2 name x y wA wB wSel = do
   cid <- freshComp
   Mux2Net wOut wNotSel wA1 wA2 <- netMux2 wA wB wSel
-  let lgNot  = LayoutGate wNotSel "NOT" (name++"_not")  3  1 4 3 [wSel]        wNotSel
-      lgAnd1 = LayoutGate wA1     "AND" (name++"_and1") 10 0 6 3 [wA, wNotSel] wA1
-      lgAnd2 = LayoutGate wA2     "AND" (name++"_and2") 10 8 6 3 [wB, wSel]    wA2
-      lgOr   = LayoutGate wOut    "OR"  (name++"_or")   18 4 6 3 [wA1, wA2]    wOut
-      comp = LayoutComp cid "MUX2" name name x y 24 18 "#e84393"
+  -- ゲートをy=4以降に配置してラベル文字との重なりを回避 (高さ18→22)
+  let lgNot  = LayoutGate wNotSel "NOT" (name++"_not")  3  5 4 3 [wSel]        wNotSel
+      lgAnd1 = LayoutGate wA1     "AND" (name++"_and1") 10 4 6 3 [wA, wNotSel] wA1
+      lgAnd2 = LayoutGate wA2     "AND" (name++"_and2") 10 12 6 3 [wB, wSel]   wA2
+      lgOr   = LayoutGate wOut    "OR"  (name++"_or")   18 8 6 3 [wA1, wA2]    wOut
+      comp = LayoutComp cid "MUX2" name name x y 24 22 "#e84393"
                [] [lgNot, lgAnd1, lgAnd2, lgOr] []
-               [("A",LayoutPin wA 0 2),("B",LayoutPin wB 0 10),("Sel",LayoutPin wSel 0 16)]
-               [("Out", LayoutPin wOut 24 6)]
+               [("A",LayoutPin wA 0 6),("B",LayoutPin wB 0 14),("Sel",LayoutPin wSel 0 20)]
+               [("Out", LayoutPin wOut 24 10)]
                0
   return (comp, wOut)
 
@@ -375,24 +376,42 @@ buildMux4_8bit :: String -> Double -> Double
                -> Build (LayoutComp, [Int])
 buildMux4_8bit name x y wI0s wI1s wI2s wI3s wSel0 wSel1 = do
   cid <- freshComp
-  results <- forM (zip4 wI0s wI1s wI2s wI3s `zip` wI3s `zip` [0..7]) $
-             \(((w0,w1,w2,w3),_),i) -> do
-    (ma, outA) <- buildMux2 (name++"_m1a_"++show (i::Int)) (10+d i*13) 5  w0 w1 wSel0
-    (mb, outB) <- buildMux2 (name++"_m1b_"++show (i::Int)) (10+d i*13) 30 w2 w3 wSel0
-    (mc, outC) <- buildMux2 (name++"_m2_" ++show (i::Int)) (10+d i*13) 58 outA outB wSel1
-    return ([ma,mb,mc], outC)
-  let (childGroups, outs) = unzip results
+  -- ビット間隔27 (MUX2幅24+余白3) で重ならないように配置
+  results <- forM (zip5 wI0s wI1s wI2s wI3s [0..7]) $ \(w0,w1,w2,w3,i) -> do
+    (ma, outA) <- buildMux2 (name++"_m1a_"++show (i::Int)) (10+d i*27) 5  w0 w1 wSel0
+    (mb, outB) <- buildMux2 (name++"_m1b_"++show (i::Int)) (10+d i*27) 30 w2 w3 wSel0
+    (mc, outC) <- buildMux2 (name++"_m2_" ++show (i::Int)) (10+d i*27) 58 outA outB wSel1
+    -- 段間配線: m1a/m1b出力(右辺) → m2入力(左辺) を右→下→左でルーティング
+    let xo = 10 + d i * 27   -- 各ビット列左端
+        xr = xo + 24          -- MUX2右端 (= 34 + i*27)
+        xg = xr + 1           -- 列間ギャップ内 (= 35 + i*27)
+        xl = xo - 2           -- m2左端の2単位手前 (= 8 + i*27)
+    -- MUX2 h=22: m1a出力y=5+10=15, m1b出力y=30+10=40, m2入力A y=58+6=64, 入力B y=58+14=72
+    let segA = (outA, [ LayoutSeg xr 15 xg 15 cid   -- m1a出力 → ギャップへ
+                      , LayoutSeg xg 15 xg 54 cid   -- 下へ (m1b底52-m2天58のギャップ)
+                      , LayoutSeg xg 54 xl 54 cid   -- 左へ
+                      , LayoutSeg xl 54 xl 64 cid   -- 下へ m2入力A(y=64)へ
+                      , LayoutSeg xl 64 xo 64 cid ])-- m2入力Aへ
+        segB = (outB, [ LayoutSeg xr 40 xg 40 cid   -- m1b出力 → ギャップへ
+                      , LayoutSeg xg 40 xg 56 cid   -- 下へ
+                      , LayoutSeg xg 56 xl 56 cid   -- 左へ
+                      , LayoutSeg xl 56 xl 72 cid   -- 下へ m2入力B(y=72)へ
+                      , LayoutSeg xl 72 xo 72 cid ])-- m2入力Bへ
+    return ([ma,mb,mc], outC, [segA, segB])
+  let (childGroups, outs, segGroups) = unzip3 results
       allChildren = concat childGroups
-      selIns = [("Sel0",LayoutPin wSel0 60 90),("Sel1",LayoutPin wSel1 70 90)]
+      allSegs     = concat segGroups
+      selIns = [("Sel0",LayoutPin wSel0 105 90),("Sel1",LayoutPin wSel1 125 90)]
       bitIns = concatMap (\(w0,w1,w2,w3,i) ->
                  [("I0_"++show (i::Int),LayoutPin w0 0 8)
                  ,("I1_"++show (i::Int),LayoutPin w1 0 18)
                  ,("I2_"++show (i::Int),LayoutPin w2 0 38)
                  ,("I3_"++show (i::Int),LayoutPin w3 0 48)])
                  (zip5 wI0s wI1s wI2s wI3s [0..7])
-      bitOuts = zipWith (\o i -> ("O"++show (i::Int), LayoutPin o 120 64)) outs [0..7]
-  let comp = LayoutComp cid "MUX4_8BIT" name name x y 120 90 "#e84393"
-               allChildren [] [] (selIns++bitIns) bitOuts 0
+      -- 最終ビット右端: 10+7*27+24 = 233; 出力ピンy = m2 y(58) + Out pin y(10) = 68
+      bitOuts = zipWith (\o i -> ("O"++show (i::Int), LayoutPin o 237 68)) outs [0..7]
+  let comp = LayoutComp cid "MUX4_8BIT" name name x y 240 90 "#e84393"
+               allChildren [] allSegs (selIns++bitIns) bitOuts 0
   return (comp, outs)
 
 zip5 :: [a]->[b]->[c]->[d]->[e]->[(a,b,c,d,e)]
@@ -415,15 +434,15 @@ buildALU name x y wAs wBs wSel0 wSel1 wSubMode = do
   (xorBlk, xorOuts)   <- buildBitwise8 (name++"_xor") "XOR" "#e17055" 10 155 wAs wBs
   (mux, muxOuts) <- buildMux4_8bit (name++"_mux") 10 180
                       sums andOuts orOuts xorOuts wSel0 wSel1
-  -- ゼロフラグ検出 OR ツリー
-  (_, wz1) <- lgate "OR" (name++"_zor1") 0  270 5 3 [muxOuts!!0, muxOuts!!1]
-  (_, wz2) <- lgate "OR" (name++"_zor2") 0  276 5 3 [muxOuts!!2, muxOuts!!3]
-  (_, wz3) <- lgate "OR" (name++"_zor3") 0  282 5 3 [muxOuts!!4, muxOuts!!5]
-  (_, wz4) <- lgate "OR" (name++"_zor4") 0  288 5 3 [muxOuts!!6, muxOuts!!7]
-  (_, wz5) <- lgate "OR" (name++"_zor5") 10 272 5 3 [wz1, wz2]
-  (_, wz6) <- lgate "OR" (name++"_zor6") 10 284 5 3 [wz3, wz4]
-  (_, wz7) <- lgate "OR" (name++"_zor7") 20 278 5 3 [wz5, wz6]
-  (lgNotZ, wZero) <- lgate "NOT" (name++"_notZ") 30 277 4 3 [wz7]
+  -- ゼロフラグ検出 OR ツリー (MUXの右側 x=255〜 に配置して ALU 枠内に収める)
+  (_, wz1) <- lgate "OR" (name++"_zor1") 255 183 5 3 [muxOuts!!0, muxOuts!!1]
+  (_, wz2) <- lgate "OR" (name++"_zor2") 255 196 5 3 [muxOuts!!2, muxOuts!!3]
+  (_, wz3) <- lgate "OR" (name++"_zor3") 255 209 5 3 [muxOuts!!4, muxOuts!!5]
+  (_, wz4) <- lgate "OR" (name++"_zor4") 255 222 5 3 [muxOuts!!6, muxOuts!!7]
+  (_, wz5) <- lgate "OR" (name++"_zor5") 270 189 5 3 [wz1, wz2]
+  (_, wz6) <- lgate "OR" (name++"_zor6") 270 215 5 3 [wz3, wz4]
+  (_, wz7) <- lgate "OR" (name++"_zor7") 285 202 5 3 [wz5, wz6]
+  (lgNotZ, wZero) <- lgate "NOT" (name++"_notZ") 300 202 4 3 [wz7]
   let ins  = [("Op0",LayoutPin wSel0 200 280),("Op1",LayoutPin wSel1 220 280)
              ,("Sub",LayoutPin wSubMode 240 280)]
              ++ zipWith (\w i -> ("A"++show (i::Int), LayoutPin w 0 (40+d i*6))) wAs [0..7]
