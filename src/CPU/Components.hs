@@ -225,8 +225,12 @@ layoutHalfAdder name x y wA wB (HalfAdderNet wSum wCarry) = do
   cid <- freshComp
   let lgXor = LayoutGate wSum   "XOR" (name++"_xor") 10 1 6 4 [wA, wB] wSum
       lgAnd = LayoutGate wCarry "AND" (name++"_and") 10 9 6 4 [wA, wB] wCarry
-      segs  = [ (wA,     [LayoutSeg 0 4 10 3 cid, LayoutSeg 0 4 10 11 cid])
-              , (wB,     [LayoutSeg 0 12 10 5 cid, LayoutSeg 0 12 10 13 cid])
+      segs  = [ (wA,     [ LayoutSeg 0 4  2  4 cid
+                         , LayoutSeg 2 4  2  3 cid, LayoutSeg 2  3 10  3 cid
+                         , LayoutSeg 2 4  2 11 cid, LayoutSeg 2 11 10 11 cid ])
+              , (wB,     [ LayoutSeg 0 12 6 12 cid
+                         , LayoutSeg 6 12 6  5 cid, LayoutSeg 6  5 10  5 cid
+                         , LayoutSeg 6 12 6 13 cid, LayoutSeg 6 13 10 13 cid ])
               , (wSum,   [LayoutSeg 16 3 24 4 cid])
               , (wCarry, [LayoutSeg 16 11 24 12 cid])
               ]
@@ -250,11 +254,19 @@ buildFullAdder name x y wA wB wCin = do
   let segs = [ (wA,       [LayoutSeg 0 8 5 6 cid])
              , (wB,       [LayoutSeg 0 16 5 14 cid])
              , (wCin,     [LayoutSeg 0 32 5 32 cid])
-             , (ha1Sum,   [LayoutSeg 29 6 5 24 cid])
-             , (ha1Carry, [LayoutSeg 29 14 38 18 cid])
-             , (ha2Carry, [LayoutSeg 29 32 38 20 cid])
-             , (wCout,    [LayoutSeg 44 18 55 18 cid])
-             , (wSum,   [LayoutSeg 29 24 55 8 cid])
+             , (ha1Sum,   [ LayoutSeg 29  6 30  6 cid
+                          , LayoutSeg 30  6 30 19 cid
+                          , LayoutSeg 30 19  3 19 cid
+                          , LayoutSeg  3 19  3 24 cid
+                          , LayoutSeg  3 24  5 24 cid ])
+             , (ha1Carry, [ LayoutSeg 29 14 38 14 cid
+                          , LayoutSeg 38 14 38 17 cid ])
+             , (ha2Carry, [ LayoutSeg 29 32 38 32 cid
+                          , LayoutSeg 38 32 38 19 cid ])
+             , (wCout,    [LayoutSeg 43 18 55 18 cid])
+             , (wSum,     [ LayoutSeg 29 24 36 24 cid
+                          , LayoutSeg 36 24 36  8 cid
+                          , LayoutSeg 36  8 55  8 cid ])
              ]
   let comp = LayoutComp cid "FULL_ADDER" name name x y 55 40 "#a29bfe"
                [ha1, ha2] [lgOr] segs
