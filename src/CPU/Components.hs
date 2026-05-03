@@ -664,15 +664,16 @@ buildCPU = fst $ runBuild go
     aluBIns  <- mapM (\_ -> freshWire) [0..7::Int]
     pcNexts  <- mapM (\_ -> freshWire) [0..7::Int]
     pcTargets<- mapM (\_ -> freshWire) [0..7::Int]
-    -- 上段: PC/MEM が y=310 まで、IR_H/IR_L が y=290 まで達するため
-    -- 下段は y=330 から開始して重なりを回避 (上段との最低20単位ギャップ)
+    -- 上段 (y=50): PC→IR_H→IR_L→DEC の命令フロー順に左から配置、MEM は右端
+    -- 下段 (y=330): RegA/RegB/ALU を IR_H/IR_L/DEC と縦に揃える
+    -- 上段最大高さ: PC/MEM h=260 → bottom=310、下段との最低20単位ギャップを確保
     (regA, regAOuts) <- buildRegister8 "RegA" 200 330 regADins wCLK
     (regB, regBOuts) <- buildRegister8 "RegB" 320 330 regBDins wCLK
-    (ir,   irOuts)   <- buildRegister8 "IR_H" 700 50  irDins   wCLK
-    (irL,  irLOuts)  <- buildRegister8 "IR_L" 820 50  irLDins  wCLK
+    (ir,   irOuts)   <- buildRegister8 "IR_H" 200 50  irDins   wCLK
+    (irL,  irLOuts)  <- buildRegister8 "IR_L" 320 50  irLDins  wCLK
     (dec,  decRefs)  <- buildDecoder   "DEC"  450 50  decOpIns
     (mem, memAddrs, _memDatIns, memDatOuts, wMemRead, wMemWrite)
-                     <- buildMemory "MEM" 200 50
+                     <- buildMemory "MEM" 670 50
     (pc, pcOuts)     <- buildPC "PC" 50 50 pcNexts pcTargets wBranch wCLK
     (alu, aluOuts, wZero, wCout)
                      <- buildALU "ALU" 450 330 aluAIns aluBIns wSel0 wSel1 wSubMode
@@ -693,7 +694,7 @@ buildCPU = fst $ runBuild go
           , crMemRead    = wMemRead,  crMemWrite   = wMemWrite
           }
     cid <- freshComp
-    let cpu = LayoutComp cid "CPU" "CPU" "CPU" 0 0 1200 800 "#2d3436"
+    let cpu = LayoutComp cid "CPU" "CPU" "CPU" 0 0 1000 650 "#2d3436"
                 [regA{lcLabel="Register A"}, regB{lcLabel="Register B"}
                 ,ir{lcLabel="IR (Opcode)"}, irL{lcLabel="IR (Operand)"}
                 ,dec, mem, pc, alu]
