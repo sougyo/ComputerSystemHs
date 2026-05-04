@@ -185,7 +185,7 @@ class Renderer {
     _drawWireSegs(ctx, wireId, segs, baseX, baseY, z) {
         const val   = this.wires[wireId] || 0;
         const pulse = this.pulseWires.has(wireId);
-        ctx.strokeStyle = pulse ? '#ffff00' : (val ? '#00ff88' : '#334');
+        ctx.strokeStyle = val ? '#00ff88' : (pulse ? '#ffff00' : '#334');
         ctx.lineWidth = (pulse ? 1.5 : 0.8) / z;
         ctx.beginPath();
         for (const s of segs) {
@@ -214,8 +214,8 @@ class Renderer {
         for (const g of (comp.gates || [])) {
             const val = this.wires[g.out] || 0;
             const pulse = this.pulseWires.has(g.out);
-            ctx.fillStyle   = pulse ? '#ffff00' : (val ? '#00ff88' : '#0d1117');
-            ctx.strokeStyle = pulse ? '#ffff00' : (val ? '#00cc66' : '#2a2a3a');
+            ctx.fillStyle   = val ? '#00ff88' : (pulse ? '#ffff00' : '#0d1117');
+            ctx.strokeStyle = val ? '#00cc66' : (pulse ? '#ffff00' : '#2a2a3a');
             ctx.lineWidth = 0.4 / z;
             ctx.fillRect  (cx + g.x, cy + g.y, g.w, g.h);
             ctx.strokeRect(cx + g.x, cy + g.y, g.w, g.h);
