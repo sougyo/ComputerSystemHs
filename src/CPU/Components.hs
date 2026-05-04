@@ -104,12 +104,15 @@ layoutSRLatch name x y wSb wRb (SRLatchNet wQ wQb) = do
   cid <- freshComp
   let lg1 = LayoutGate wQ  "NAND" (name++"_n1") 6 1 5 4 [wSb,wQb] wQ
       lg2 = LayoutGate wQb "NAND" (name++"_n2") 6 8 5 4 [wRb,wQ]  wQb
+      -- wQ  帰還: N1出力(x=11,y=3)から右へ → x=17で折れて下 → N2第2入力(y=12)へ左
+      -- wQb 帰還: N2出力(x=11,y=10)から右へ → x=13で折れて上 → N1第2入力(y=5)へ左
+      -- x=17 と x=13 を分けることで2本の帰還線を視覚的に区別する
       segs = [ (wSb,  [LayoutSeg 0 3 6 3 cid])
              , (wRb,  [LayoutSeg 0 11 6 10 cid])
              , (wQ,   [LayoutSeg 11 3 20 3 cid
-                      ,LayoutSeg 13 3 13 10 cid, LayoutSeg 13 10 6 12 cid])
+                      ,LayoutSeg 17 3 17 12 cid, LayoutSeg 17 12 6 12 cid])
              , (wQb,  [LayoutSeg 11 10 20 11 cid
-                      ,LayoutSeg 13 10 13 3 cid, LayoutSeg 13 3 6 5 cid])
+                      ,LayoutSeg 13 10 13 5 cid, LayoutSeg 13 5 6 5 cid])
              ]
   return $ LayoutComp cid "SR_LATCH" name name x y 20 14 "#00cec9"
              [] [lg1,lg2] segs
