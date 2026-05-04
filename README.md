@@ -23,26 +23,43 @@ Haskell (純粋シミュレーション)
 JavaScript (Canvas レンダリング + UI)
 ```
 
-### 命令セット (16 命令)
+### 命令セット (26 命令)
 
-| オペコード | ニーモニック  | 動作                  |
-|-----------|-------------|-----------------------|
-| `0x00`    | `NOP`       | 何もしない              |
-| `0x01`    | `LOAD_A n`  | A ← n                 |
-| `0x02`    | `LOAD_B n`  | B ← n                 |
-| `0x03`    | `LOAD_A_MEM addr` | A ← MEM[addr]  |
-| `0x04`    | `STORE_A addr`    | MEM[addr] ← A  |
-| `0x05`    | `ADD`       | A ← A + B             |
-| `0x06`    | `SUB`       | A ← A − B             |
-| `0x07`    | `AND`       | A ← A & B             |
-| `0x08`    | `OR`        | A ← A \| B            |
-| `0x09`    | `XOR`       | A ← A ^ B             |
-| `0x0A`    | `NOT`       | A ← ~A                |
-| `0x0B`    | `JMP addr`  | PC ← addr             |
-| `0x0C`    | `JZ addr`   | Z=1 なら PC ← addr    |
-| `0x0D`    | `JNZ addr`  | Z=0 なら PC ← addr    |
-| `0x0E`    | `SHL`       | A ← A << 1, C ← 元bit7 |
-| `0x0F`    | `HLT`       | 停止                   |
+#### 基本命令 (0x00〜0x0F、回路層実装済み)
+
+| オペコード | ニーモニック  | 動作                    |
+|-----------|-------------|-------------------------|
+| `0x00`    | `NOP`       | 何もしない                |
+| `0x01`    | `LOAD_A n`  | A ← n                   |
+| `0x02`    | `LOAD_B n`  | B ← n (即値)             |
+| `0x03`    | `LOAD_A_MEM addr` | A ← MEM[addr]    |
+| `0x04`    | `STORE_A addr`    | MEM[addr] ← A    |
+| `0x05`    | `ADD`       | A ← A + B               |
+| `0x06`    | `SUB`       | A ← A − B               |
+| `0x07`    | `AND`       | A ← A & B               |
+| `0x08`    | `OR`        | A ← A \| B              |
+| `0x09`    | `XOR`       | A ← A ^ B               |
+| `0x0A`    | `NOT`       | A ← ~A                  |
+| `0x0B`    | `JMP addr`  | PC ← addr               |
+| `0x0C`    | `JZ addr`   | Z=1 なら PC ← addr      |
+| `0x0D`    | `JNZ addr`  | Z=0 なら PC ← addr      |
+| `0x0E`    | `SHL`       | A ← A << 1, C ← 元bit7  |
+| `0x0F`    | `HLT`       | 停止                     |
+
+#### 拡張命令 (0x10〜0x19、シミュレーション層実装)
+
+| オペコード | ニーモニック       | 動作                              |
+|-----------|------------------|-----------------------------------|
+| `0x10`    | `LOAD_B_MEM addr` | B ← MEM[addr]                   |
+| `0x11`    | `MOV_B_A`        | B ← A                            |
+| `0x12`    | `MUL`            | A ← A × B (下位8bit), C ← overflow |
+| `0x13`    | `SHR`            | A ← A >> 1 (論理右シフト), C ← 元bit0 |
+| `0x14`    | `CMP`            | A−B でフラグ更新のみ、A は変更しない |
+| `0x15`    | `PUSH`           | MEM[SP] ← A; SP ← SP − 1        |
+| `0x16`    | `POP`            | SP ← SP + 1; A ← MEM[SP]        |
+| `0x17`    | `CALL addr`      | PUSH(PC+2); PC ← addr            |
+| `0x18`    | `RET`            | POP → PC                         |
+| `0x19`    | `JNS addr`       | N=0 なら PC ← addr               |
 
 ---
 
@@ -104,6 +121,35 @@ evaluate gs = go 20
     go n vs = let vs' = evalOnePass gs vs
               in  if vs' == vs then vs' else go (n-1) vs'
 ```
+
+### CPU ステート
+
+```haskell
+data CPUState = CPUState
+  { csRegA      :: !Word8   -- アキュムレータ A
+  , csRegB      :: !Word8   -- レジスタ B
+  , csPC        :: !Word8   -- プログラムカウンタ (8bit = 最大 256B)
+  , csSP        :: !Word8   -- スタックポインタ (初期値 0x7F、下向き)
+  , csIROpcode  :: !Word8   -- 命令レジスタ (オペコード)
+  , csIROperand :: !Word8   -- 命令レジスタ (オペランド)
+  , csFlagZ     :: !Bool    -- ゼロフラグ
+  , csFlagC     :: !Bool    -- キャリーフラグ
+  , csFlagN     :: !Bool    -- ネガティブフラグ (bit7=1)
+  , csHalted    :: !Bool    -- HLT 実行済み
+  , csMemory    :: !Mem     -- 256 バイトメモリ
+  , csWires     :: !WireVals
+  }
+```
+
+**メモリマップ**
+
+| 領域 | 用途 |
+|------|------|
+| `0x00`〜`0x5F` | プログラム (命令列、最大 48 命令) |
+| `0x60`〜`0x6F` | 未使用 |
+| `0x70`〜`0x7F` | スタック領域 (SP 初期値 0x7F、最大 16 フレーム) |
+| `0x80`〜`0xDF` | 変数領域 (コンパイラ割り当て) |
+| `0xE0`〜`0xF8` | MMIO ディスプレイ (5×5 ピクセル) |
 
 ### CPU ステップ (純粋関数)
 
@@ -231,7 +277,10 @@ renderer.setLayout(layout);
 HaskellCPU.loadAsm('LOAD_A 25\nLOAD_B 17\nADD\nHLT');
 HaskellCPU.step();
 const state = HaskellCPU.getState();
-// { regA: "0x2a", regAVal: 42, flagZ: false, halted: true, ... }
+// { regA: "0x2a", regAVal: 42, regB: "0x11", regBVal: 17,
+//   pc: "0x08", pcVal: 8, sp: "0x7f", spVal: 127,
+//   flagZ: false, flagC: false, flagN: false, halted: true,
+//   instrName: "ADD", memory: [...] }
 ```
 
 ---
@@ -259,6 +308,26 @@ LOAD_A_MEM 0x80
 LOAD_B 1
 JMP 4         ; ループ先頭へ
 HLT
+```
+
+```asm
+; 乗算: A = 10 × mem[0x80] (MUL命令)
+LOAD_A 10
+LOAD_B_MEM 0x80   ; B ← MEM[0x80]
+MUL               ; A ← 10 × B (下位8bit)
+HLT
+```
+
+```asm
+; CALL / RET を使った関数呼び出し
+; (アドレス0〜5: メイン, アドレス6〜11: サブルーチン)
+LOAD_A 5
+CALL 6        ; サブルーチン(addr=6)へ、戻りアドレス(4)をスタックにプッシュ
+HLT
+; --- サブルーチン (addr=6) ---
+LOAD_B 2
+MUL           ; A ← A × 2
+RET           ; スタックから戻りアドレスをポップして復帰
 ```
 
 ---

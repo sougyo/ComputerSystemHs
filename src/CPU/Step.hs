@@ -76,12 +76,17 @@ stepCPU gates refs st
     aluCout   = w8bool (crALUCout refs) vs2
 
     -- 命令実行 (純粋)
-    (newRegA, newRegB, newPC, newMem, newFlagC, writeA) =
-      execInstr opcode opernd (csRegA st) (csRegB st)
+    (newRegA, newRegB, newSP, newPC, newMem, newFlagC, writeA) =
+      execInstr opcode opernd (csRegA st) (csRegB st) (csSP st)
                 (fromIntegral (csPC st)) mem aluResult aluCout
 
-    newFlagZ = writeA && (newRegA == 0)
-    newFlagN = writeA && ((newRegA .&. 0x80) /= 0)
+    -- CMP (0x14): A を変更せず ALU 結果でフラグ更新
+    newFlagZ
+      | opcode == 0x14 = aluResult == 0
+      | otherwise      = writeA && (newRegA == 0)
+    newFlagN
+      | opcode == 0x14 = (aluResult .&. 0x80) /= 0
+      | otherwise      = writeA && ((newRegA .&. 0x80) /= 0)
     newHalted = opcode == 0x0F
 
     -- レジスタ出力ワイヤ更新 (レンダリング用)
@@ -100,6 +105,7 @@ stepCPU gates refs st
       { csRegA      = newRegA
       , csRegB      = newRegB
       , csPC        = fromIntegral (newPC .&. 0xFF)
+      , csSP        = newSP
       , csIROpcode  = opcode
       , csIROperand = opernd
       , csFlagZ     = newFlagZ
@@ -112,37 +118,63 @@ stepCPU gates refs st
 
 -- 命令実行の純粋部分
 execInstr :: Word8 -> Word8
-          -> Word8 -> Word8
+          -> Word8 -> Word8 -> Word8
           -> Int
           -> Array Int Word8
           -> Word8 -> Bool
-          -> (Word8, Word8, Int, Array Int Word8, Bool, Bool)
-execInstr op opr regA regB pc mem aluRes aluCout =
+          -> (Word8, Word8, Word8, Int, Array Int Word8, Bool, Bool)
+execInstr op opr regA regB sp pc mem aluRes aluCout =
   let nextPC = pc + 2
   in case op of
-    0x00 -> (regA, regB, nextPC, mem, False, False)
-    0x01 -> (opr,  regB, nextPC, mem, False, True)
-    0x02 -> (regA, opr,  nextPC, mem, False, False)
+    0x00 -> (regA, regB, sp, nextPC, mem, False, False)
+    0x01 -> (opr,  regB, sp, nextPC, mem, False, True)
+    0x02 -> (regA, opr,  sp, nextPC, mem, False, False)
     0x03 -> let a = mem ! fromIntegral opr
-            in (a, regB, nextPC, mem, False, True)
+            in (a, regB, sp, nextPC, mem, False, True)
     0x04 -> let m = mem // [(fromIntegral opr, regA)]
-            in (regA, regB, nextPC, m, False, False)
-    0x05 -> (aluRes, regB, nextPC, mem, aluCout, True)
-    0x06 -> (aluRes, regB, nextPC, mem, not aluCout, True)
-    0x07 -> (aluRes, regB, nextPC, mem, False, True)
-    0x08 -> (aluRes, regB, nextPC, mem, False, True)
-    0x09 -> (aluRes, regB, nextPC, mem, False, True)
+            in (regA, regB, sp, nextPC, m, False, False)
+    0x05 -> (aluRes, regB, sp, nextPC, mem, aluCout, True)
+    0x06 -> (aluRes, regB, sp, nextPC, mem, not aluCout, True)
+    0x07 -> (aluRes, regB, sp, nextPC, mem, False, True)
+    0x08 -> (aluRes, regB, sp, nextPC, mem, False, True)
+    0x09 -> (aluRes, regB, sp, nextPC, mem, False, True)
     0x0A -> let r = (complement regA) .&. 0xFF
-            in (r, regB, nextPC, mem, False, True)
-    0x0B -> (regA, regB, fromIntegral opr, mem, False, False)
+            in (r, regB, sp, nextPC, mem, False, True)
+    0x0B -> (regA, regB, sp, fromIntegral opr, mem, False, False)
     0x0C -> let t = if regA == 0 then fromIntegral opr else nextPC
-            in (regA, regB, t, mem, False, False)
+            in (regA, regB, sp, t, mem, False, False)
     0x0D -> let t = if regA /= 0 then fromIntegral opr else nextPC
-            in (regA, regB, t, mem, False, False)
+            in (regA, regB, sp, t, mem, False, False)
     0x0E -> let c = (regA .&. 0x80) /= 0
                 r = (regA `shiftL` 1) .&. 0xFF
-            in (r, regB, nextPC, mem, c, True)
-    _    -> (regA, regB, nextPC, mem, False, False)
+            in (r, regB, sp, nextPC, mem, c, True)
+    -- 新命令 (0x10〜0x19)
+    0x10 -> let a = mem ! fromIntegral opr          -- LOAD_B_MEM: B ← mem[addr]
+            in (regA, a, sp, nextPC, mem, False, False)
+    0x11 -> (regA, regA, sp, nextPC, mem, False, False) -- MOV_B_A: B ← A
+    0x12 -> let r = (fromIntegral regA * fromIntegral regB) .&. (0xFF :: Int) -- MUL
+                c = (fromIntegral regA * fromIntegral regB) > (0xFF :: Int)
+            in (fromIntegral r, regB, sp, nextPC, mem, c, True)
+    0x13 -> let c = (regA .&. 0x01) /= 0            -- SHR: A ← A >> 1
+                r = regA `shiftR` 1
+            in (r, regB, sp, nextPC, mem, c, True)
+    0x14 -> (regA, regB, sp, nextPC, mem, False, False) -- CMP: フラグはstepCPU側で処理
+    0x15 -> let sp' = sp - 1                         -- PUSH: mem[sp-1] ← A; SP ← SP-1
+                m   = mem // [(fromIntegral sp', regA)]
+            in (regA, regB, sp', nextPC, m, False, False)
+    0x16 -> let sp' = sp + 1                         -- POP: SP ← SP+1; A ← mem[SP]
+                a   = mem ! fromIntegral sp'
+            in (a, regB, sp', nextPC, mem, False, True)
+    0x17 -> let sp' = sp - 1                         -- CALL: push(PC+2); JMP addr
+                m   = mem // [(fromIntegral sp', fromIntegral nextPC)]
+            in (regA, regB, sp', fromIntegral opr, m, False, False)
+    0x18 -> let sp' = sp + 1                         -- RET: PC ← mem[SP+1]
+                pc' = fromIntegral (mem ! fromIntegral sp')
+            in (regA, regB, sp', pc', mem, False, False)
+    0x19 -> let flagN = (regA .&. 0x80) /= 0         -- JNS: N=0 なら JMP addr
+                t = if not flagN then fromIntegral opr else nextPC
+            in (regA, regB, sp, t, mem, False, False)
+    _    -> (regA, regB, sp, nextPC, mem, False, False)
 
 -- ──────────────────────────────────────────────
 resetCPU :: CPURefs -> CPUState -> CPUState

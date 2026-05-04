@@ -68,6 +68,7 @@ data CPUState = CPUState
   { csRegA      :: !Word8
   , csRegB      :: !Word8
   , csPC        :: !Word8
+  , csSP        :: !Word8
   , csIROpcode  :: !Word8
   , csIROperand :: !Word8
   , csFlagZ     :: !Bool
@@ -83,6 +84,7 @@ initialCPUState _refs = CPUState
   { csRegA      = 0
   , csRegB      = 0
   , csPC        = 0
+  , csSP        = 0x7F
   , csIROpcode  = 0
   , csIROperand = 0
   , csFlagZ     = False

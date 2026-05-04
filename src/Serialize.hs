@@ -25,11 +25,13 @@ cpuStateJSON st = renderJSON $ jObj
   [ ("regA",      jStr (hex8 (csRegA st)))
   , ("regB",      jStr (hex8 (csRegB st)))
   , ("pc",        jStr (hex8 (csPC st)))
+  , ("sp",        jStr (hex8 (csSP st)))
   , ("irOpcode",  jStr (hex8 (csIROpcode st)))
   , ("irOperand", jStr (hex8 (csIROperand st)))
   , ("regAVal",   JInt (fromIntegral (csRegA st)))
   , ("regBVal",   JInt (fromIntegral (csRegB st)))
   , ("pcVal",     JInt (fromIntegral (csPC st)))
+  , ("spVal",     JInt (fromIntegral (csSP st)))
   , ("flagZ",     jBool (csFlagZ st))
   , ("flagC",     jBool (csFlagC st))
   , ("flagN",     jBool (csFlagN st))
@@ -47,7 +49,10 @@ opcodeToName op = case op of
   0x00->"NOP";  0x01->"LOAD_A"; 0x02->"LOAD_B"; 0x03->"LOAD_A_MEM"
   0x04->"STORE_A"; 0x05->"ADD"; 0x06->"SUB"; 0x07->"AND"
   0x08->"OR";   0x09->"XOR";  0x0A->"NOT"; 0x0B->"JMP"
-  0x0C->"JZ";   0x0D->"JNZ"; 0x0E->"SHL"; 0x0F->"HLT"; _->"???"
+  0x0C->"JZ";        0x0D->"JNZ";  0x0E->"SHL";  0x0F->"HLT"
+  0x10->"LOAD_B_MEM"; 0x11->"MOV_B_A"; 0x12->"MUL"; 0x13->"SHR"
+  0x14->"CMP"; 0x15->"PUSH"; 0x16->"POP"; 0x17->"CALL"
+  0x18->"RET"; 0x19->"JNS"; _->"???"
 
 -- ──────────────────────────────────────────────
 -- ワイヤ値 (wireId, value) のフラット配列

@@ -39,6 +39,16 @@ mnemonicToOpcode m = case m of
   "JNZ"       -> 0x0D
   "SHL"       -> 0x0E
   "HLT"       -> 0x0F
+  "LOAD_B_MEM"-> 0x10
+  "MOV_B_A"   -> 0x11
+  "MUL"       -> 0x12
+  "SHR"       -> 0x13
+  "CMP"       -> 0x14
+  "PUSH"      -> 0x15
+  "POP"       -> 0x16
+  "CALL"      -> 0x17
+  "RET"       -> 0x18
+  "JNS"       -> 0x19
   _           -> 0x00
 
 readNum :: String -> Word8
