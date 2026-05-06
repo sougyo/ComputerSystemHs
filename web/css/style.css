@@ -240,45 +240,76 @@ body {
 /* メモリビューア */
 #memoryPanel {
     bottom: 60px; right: 10px;
-    width: 240px;
-    max-height: 250px;
-    overflow-y: auto;
+    width: 260px;
+    height: 420px;
+    min-width: 180px;
+    min-height: 100px;
+    resize: both;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 #memoryPanel h2 {
     font-size: 16px;
     color: #4a9eff;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     border-bottom: 1px solid rgba(74, 158, 255, 0.3);
     padding-bottom: 6px;
+    flex-shrink: 0;
 }
+#memoryPanel .panel-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+#memLegend {
+    font-size: 9px;
+    color: #555;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+    flex-shrink: 0;
+    line-height: 1.8;
+}
+#memLegend span { white-space: nowrap; }
 #memoryView {
     font-size: 11px;
-    line-height: 1.6;
+    line-height: 1.5;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
 }
 .mem-row {
     display: flex;
-    gap: 4px;
+    align-items: center;
+    gap: 0;
 }
 .mem-addr {
-    color: #555;
-    width: 28px;
+    color: #444;
+    width: 30px;
     text-align: right;
+    margin-right: 4px;
+    flex-shrink: 0;
+    font-size: inherit;
 }
+.mem-cells { display: flex; gap: 1px; }
 .mem-cell {
-    width: 22px;
+    width: 20px;
     text-align: center;
-    color: #666;
+    color: #3a3a5a;
     border-radius: 2px;
+    font-size: inherit;
+    cursor: default;
 }
-.mem-cell.nonzero {
-    color: #00ff88;
-    background: rgba(0, 255, 136, 0.08);
-}
-.mem-cell.current {
-    color: #ff6b9d;
-    background: rgba(255, 107, 157, 0.15);
-    font-weight: bold;
-}
+.mem-cell.mem-nz  { color: #00aa55; }
+.mem-cell.mem-pc  { color: #ff6b9d; background: rgba(255,107,157,0.22); font-weight: bold; }
+.mem-cell.mem-sp  { color: #fdcb6e; background: rgba(253,203,110,0.18); }
+.mem-cell.mem-kb  { color: #74b9ff; background: rgba(116,185,255,0.12); }
+.mem-cell.mem-vec { color: #a29bfe; background: rgba(162,155,254,0.12); }
+.mem-cell.mem-dsp { color: #e17055; background: rgba(225,112,85,0.10); }
 
 /* ヘルプ */
 #btnHelp {
@@ -339,14 +370,15 @@ body {
     font-family: inherit;
 }
 
-/* 折りたたみパネル */
+/* 折りたたみ + ドラッグパネル */
 .panel h2 {
-    cursor: pointer;
+    cursor: grab;
     user-select: none;
     display: flex;
     justify-content: space-between;
     align-items: center;
 }
+.panel h2:active { cursor: grabbing; }
 .panel h2::after {
     content: '▾';
     font-size: 11px;

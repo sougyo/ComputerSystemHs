@@ -203,36 +203,45 @@ RTI             ; 0x0E: 割り込みから復帰 (IEを再有効化)`,
         if (btnRun)  btnRun.disabled  = !!state.halted || running;
 
         // メモリビュー
-        updateMemoryView(state.memory || []);
+        updateMemoryView(state.memory || [], state);
     }
 
-    function updateMemoryView(mem) {
+    function updateMemoryView(mem, state) {
         const el = document.getElementById('memoryView');
         if (!el) return;
-        const rows = [];
-        for (let i = 0; i < 64; i += 8) {
-            const addr = '0x' + i.toString(16).padStart(2,'0');
-            const bytes = mem.slice(i, i+8).map(b =>
-                (b||0).toString(16).padStart(2,'0')).join(' ');
-            rows.push(`<div class="mem-row"><span class="mem-addr">${addr}</span> <span class="mem-bytes">${bytes}</span></div>`);
-        }
-        // キーボード / IRQ MMIO 領域
-        const kbCode = mem[KB_DATA_ADDR] || 0;
-        const kbChar = (kbCode >= 0x20 && kbCode < 0x7F) ? String.fromCharCode(kbCode) : '?';
-        const vecVal = mem[IRQ_VEC_ADDR] || 0;
-        rows.push(`<div class="mem-row" style="margin-top:6px;opacity:0.6"><span class="mem-addr" style="color:#74b9ff">KB MMIO</span></div>`);
-        rows.push(`<div class="mem-row"><span class="mem-addr" style="color:#74b9ff">0xDC</span> <span class="mem-bytes" style="color:#74b9ff">KB=${(kbCode).toString(16).padStart(2,'0')} '${kbChar}'</span></div>`);
-        rows.push(`<div class="mem-row"><span class="mem-addr" style="color:#74b9ff">0xFE</span> <span class="mem-bytes" style="color:#74b9ff">VEC=0x${vecVal.toString(16).padStart(2,'0')}</span></div>`);
+        const pcVal  = (state && state.pcVal)  || 0;
+        const spVal  = (state && state.spVal)  || 0;
 
-        // ディスプレイ MMIO 領域 (0xE0-0xF8) を別セクションで表示
-        rows.push(`<div class="mem-row" style="margin-top:6px;opacity:0.6"><span class="mem-addr" style="color:#fdcb6e">DISP MMIO</span></div>`);
-        for (let r = 0; r < 5; r++) {
-            const base = DISPLAY_BASE + r * 5;
-            const addr = '0x' + base.toString(16).padStart(2,'0');
-            const bytes = Array.from({length:5}, (_,c) => ((mem[base+c]||0) ? '##' : '--')).join(' ');
-            rows.push(`<div class="mem-row"><span class="mem-addr" style="color:#fdcb6e">${addr}</span> <span class="mem-bytes" style="color:#fdcb6e">${bytes}</span></div>`);
+        const rows = [];
+        for (let i = 0; i < 256; i += 8) {
+            const addrStr = '0x' + i.toString(16).padStart(2,'0');
+            const cells = [];
+            for (let j = 0; j < 8; j++) {
+                const a = i + j;
+                const v = mem[a] || 0;
+                const hex = v.toString(16).padStart(2,'0');
+                const tip = '0x' + a.toString(16).padStart(2,'0') + '=' + v;
+                let cls = 'mem-cell';
+                if (a === pcVal || a === pcVal + 1) cls += ' mem-pc';
+                else if (a === spVal)               cls += ' mem-sp';
+                else if (a === KB_DATA_ADDR)        cls += ' mem-kb';
+                else if (a === IRQ_VEC_ADDR)        cls += ' mem-vec';
+                else if (a >= DISPLAY_BASE && a < DISPLAY_BASE + 25) cls += ' mem-dsp';
+                else if (v !== 0)                   cls += ' mem-nz';
+                cells.push(`<span class="${cls}" title="${tip}">${hex}</span>`);
+            }
+            rows.push(
+                `<div class="mem-row">` +
+                `<span class="mem-addr">${addrStr}</span>` +
+                `<span class="mem-cells">${cells.join('')}</span>` +
+                `</div>`
+            );
         }
         el.innerHTML = rows.join('');
+
+        // PCのある行が見えるようにスクロール
+        const pcCell = el.querySelector('.mem-pc');
+        if (pcCell) pcCell.scrollIntoView({ block: 'nearest' });
     }
 
     function stopRunning() {
@@ -240,6 +249,64 @@ RTI             ; 0x0E: 割り込みから復帰 (IEを再有効化)`,
         if (runTimer) { clearInterval(runTimer); runTimer = null; }
         document.getElementById('btnRun')?.setAttribute('disabled', false);
         document.getElementById('btnPause')?.setAttribute('disabled', true);
+    }
+
+    // ── パネル ドラッグ移動 ─────────────────────
+    function makePanelDraggable(panel) {
+        const header = panel.querySelector('h2');
+        if (!header) return;
+        let preventClick = false;
+
+        // ドラッグ後のクリック（折りたたみトリガー）を1回だけ抑止
+        header.addEventListener('click', e => {
+            if (preventClick) { e.stopImmediatePropagation(); preventClick = false; }
+        }, true);
+
+        header.addEventListener('mousedown', e => {
+            if (e.button !== 0) return;
+            const startX = e.clientX, startY = e.clientY;
+            const rect   = panel.getBoundingClientRect();
+            const ox = e.clientX - rect.left;
+            const oy = e.clientY - rect.top;
+            let moved = false;
+
+            function onMove(me) {
+                if (!moved) {
+                    if (Math.hypot(me.clientX - startX, me.clientY - startY) < 5) return;
+                    moved = true;
+                    panel.style.bottom = 'auto';
+                    panel.style.right  = 'auto';
+                    panel.style.left   = rect.left + 'px';
+                    panel.style.top    = rect.top  + 'px';
+                    me.preventDefault();
+                }
+                const nx = Math.max(0, Math.min(window.innerWidth  - 40, me.clientX - ox));
+                const ny = Math.max(0, Math.min(window.innerHeight - 20, me.clientY - oy));
+                panel.style.left = nx + 'px';
+                panel.style.top  = ny + 'px';
+            }
+            function onUp() {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup',  onUp);
+                if (moved) preventClick = true;
+            }
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup',   onUp);
+        });
+    }
+
+    // ── メモリパネル Ctrl+ホイール ズーム ───────
+    function setupMemoryZoom() {
+        const panel = document.getElementById('memoryPanel');
+        const view  = document.getElementById('memoryView');
+        if (!panel || !view) return;
+        panel.addEventListener('wheel', e => {
+            if (!e.ctrlKey) return;
+            e.preventDefault();
+            const cur  = parseFloat(getComputedStyle(view).fontSize) || 11;
+            const next = Math.max(8, Math.min(18, cur + (e.deltaY < 0 ? 1 : -1)));
+            view.style.fontSize = next + 'px';
+        }, { passive: false });
     }
 
     // ── UI セットアップ ────────────────────────
@@ -308,6 +375,11 @@ RTI             ; 0x0E: 割り込みから復帰 (IEを再有効化)`,
                 try { HaskellCPU.setIRQ(ascii); } catch (_) {}
             }
         });
+
+        // 全パネルをドラッグ可能にする
+        document.querySelectorAll('.panel').forEach(makePanelDraggable);
+        // メモリパネルの Ctrl+ホイール ズーム
+        setupMemoryZoom();
     }
 
     return { init };

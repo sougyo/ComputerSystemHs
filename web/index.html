@@ -103,8 +103,16 @@
 
     <!-- メモリビューア -->
     <div id="memoryPanel" class="panel">
-        <h2>Memory</h2>
+        <h2>Memory <small style="color:#555;font-size:10px;font-weight:normal">Ctrl+ホイール でズーム</small></h2>
         <div class="panel-body">
+            <div id="memLegend">
+                <span style="color:#ff6b9d">■ PC</span>
+                <span style="color:#fdcb6e">■ SP</span>
+                <span style="color:#00aa55">■ data</span>
+                <span style="color:#74b9ff">■ KB</span>
+                <span style="color:#a29bfe">■ VEC</span>
+                <span style="color:#e17055">■ DISP</span>
+            </div>
             <div id="memoryView"></div>
         </div>
     </div>
@@ -114,8 +122,11 @@
         <div class="help-content">
             <h2>CPU Visualizer (Haskell + WASM)</h2>
             <ul>
-                <li><strong>マウスホイール:</strong> ズーム</li>
-                <li><strong>ドラッグ:</strong> 画面移動</li>
+                <li><strong>マウスホイール:</strong> 回路ビュー ズーム</li>
+                <li><strong>ドラッグ:</strong> 回路ビュー 移動</li>
+                <li><strong>パネル h2 ドラッグ:</strong> パネル 移動</li>
+                <li><strong>パネル 角ドラッグ:</strong> パネル リサイズ</li>
+                <li><strong>Ctrl+ホイール (メモリ上):</strong> メモリ フォントズーム</li>
                 <li><strong>Space:</strong> 1ステップ実行</li>
                 <li><strong>R:</strong> 連続実行 / P: 一時停止</li>
             </ul>
