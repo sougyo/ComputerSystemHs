@@ -1,10 +1,12 @@
 GHC       := ghc
 WASM_GHC  := wasm32-wasi-ghc
 SRC       := src/Main.hs
-WASM_SRC  := src/MainWasm.hs
-SRCS      := $(wildcard src/*.hs src/CPU/*.hs)
+WASM_SRC          := src/MainWasm.hs
+COMPILER_WASM_SRC := src/MainCompiler.hs
+SRCS              := $(wildcard src/*.hs src/CPU/*.hs src/Compiler/*.hs)
 OUTDIR    := web
-WASM_OUT  := $(OUTDIR)/computersystem.wasm
+WASM_OUT          := $(OUTDIR)/computersystem.wasm
+COMPILER_WASM_OUT := $(OUTDIR)/compiler.wasm
 NATIVE    := /tmp/cputest
 GHC_WASM_ENV := $(HOME)/.ghc-wasm/env
 
@@ -57,6 +59,41 @@ _wasm_build: $(SRCS)
 	  -optl-Wl,--export=free
 	@echo "✓ WASM build OK: $(WASM_OUT)"
 
+# ── コンパイラ WASM ビルド ─────────────────────────
+.PHONY: wasm-compiler
+wasm-compiler:
+	@if ! command -v $(WASM_GHC) > /dev/null 2>&1; then \
+	  if [ -f "$(GHC_WASM_ENV)" ]; then \
+	    . "$(GHC_WASM_ENV)" && $(MAKE) _wasm_compiler_build; \
+	  else \
+	    echo "ERROR: $(WASM_GHC) が見つかりません。make install-wasm-ghc を実行してください。"; \
+	    exit 1; \
+	  fi \
+	else \
+	  $(MAKE) _wasm_compiler_build; \
+	fi
+
+.PHONY: _wasm_compiler_build
+_wasm_compiler_build: $(SRCS)
+	$(WASM_GHC) --make -isrc $(COMPILER_WASM_SRC) \
+	  -no-hs-main \
+	  src/wasm_stub.c \
+	  -package parsec \
+	  -package mtl \
+	  -package containers \
+	  -o $(COMPILER_WASM_OUT) \
+	  -O2 \
+	  -optl-Wl,--export=hs_init \
+	  -optl-Wl,--export=hs_compile \
+	  -optl-Wl,--export=hs_parse_ast \
+	  -optl-Wl,--export=malloc \
+	  -optl-Wl,--export=free
+	@echo "✓ Compiler WASM build OK: $(COMPILER_WASM_OUT)"
+
+.PHONY: wasm-all
+wasm-all: wasm wasm-compiler
+	@echo "✓ All WASM builds done"
+
 # ── GHC WASM バックエンドのインストール ─────────
 .PHONY: install-wasm-ghc
 install-wasm-ghc:
@@ -93,6 +130,8 @@ help:
 	@echo "使い方:"
 	@echo "  make test              ネイティブビルド & テスト実行"
 	@echo "  make install-wasm-ghc  GHC WASM バックエンドをインストール"
-	@echo "  make wasm              WASM ビルド (要: source ~/.ghc-wasm/env)"
+	@echo "  make wasm              CPU シミュレータ WASM ビルド"
+	@echo "  make wasm-compiler     コンパイラ WASM ビルド (parsec 使用)"
+	@echo "  make wasm-all          両方ビルド"
 	@echo "  make serve             開発サーバー起動 (http://localhost:8080)"
 	@echo "  make clean             ビルド成果物を削除"

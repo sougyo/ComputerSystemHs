@@ -363,6 +363,29 @@ RTI             ; 0x0E: 割り込みから復帰 (IEを再有効化)`,
             document.getElementById('helpOverlay').style.display = 'flex';
         });
 
+        document.getElementById('btnOpenCompiler')?.addEventListener('click', () => {
+            window.open('compiler.html', 'compiler',
+                'width=1100,height=700,menubar=no,toolbar=no,location=no');
+        });
+
+        // コンパイラウィンドウから受信した ASM をロード
+        window.addEventListener('message', e => {
+            if (e.data && e.data.type === 'loadAsm' && e.data.code) {
+                const src = e.data.code;
+                try {
+                    HaskellCPU.reset();
+                    HaskellCPU.loadAsm(src);
+                    renderer.updateWires(HaskellCPU.getWires());
+                    updateUI();
+                    // カスタムプログラムとして表示
+                    document.getElementById('customProgram').value = src;
+                    document.getElementById('programSelect').value = 'custom';
+                    document.getElementById('customProgram').style.display = 'block';
+                    updateProgramListing(src);
+                } catch(err) { console.warn('loadAsm from compiler:', err); }
+            }
+        });
+
         document.addEventListener('keydown', e => {
             if (e.target.tagName === 'TEXTAREA') return;
             // UI ホットキー

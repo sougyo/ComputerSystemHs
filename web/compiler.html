@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Compiler → ComputerSystemHs</title>
+<style>
+/* ── リセット & ベース ── */
+*  { margin:0; padding:0; box-sizing:border-box; }
+body {
+    background: #0a0a1a;
+    color: #e0e0e0;
+    font-family: 'Consolas','Monaco','Courier New',monospace;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* ── ヘッダーバー ── */
+#header {
+    height: 48px;
+    background: rgba(10,15,30,0.97);
+    border-bottom: 1px solid rgba(74,158,255,0.35);
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    gap: 10px;
+    flex-shrink: 0;
+    z-index: 10;
+}
+#header .title {
+    color: #4a9eff;
+    font-size: 15px;
+    font-weight: bold;
+    white-space: nowrap;
+}
+#header .title small { color: #555; font-size: 11px; font-weight: normal; }
+#header select {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(74,158,255,0.3);
+    color: #e0e0e0;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+.hbtn {
+    background: rgba(74,158,255,0.15);
+    border: 1px solid rgba(74,158,255,0.4);
+    color: #4a9eff;
+    padding: 5px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    transition: background 0.15s;
+    white-space: nowrap;
+}
+.hbtn:hover  { background: rgba(74,158,255,0.3); }
+.hbtn:active { transform: scale(0.97); }
+.hbtn:disabled { opacity: 0.4; cursor: default; transform: none; }
+.hbtn.green {
+    background: rgba(0,255,136,0.12);
+    border-color: rgba(0,255,136,0.4);
+    color: #00ff88;
+}
+.hbtn.green:hover { background: rgba(0,255,136,0.25); }
+.spacer { flex: 1; }
+#status {
+    font-size: 11px;
+    white-space: nowrap;
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#status.ok  { color: #00ff88; }
+#status.err { color: #ff6b9d; }
+#status.info{ color: #888; }
+
+/* ── メインコンテンツ (2ペイン) ── */
+#content {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+}
+
+/* ── ペイン共通 ── */
+.pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 0;
+}
+.pane + .pane {
+    border-left: 1px solid rgba(74,158,255,0.18);
+}
+.pane-header {
+    height: 30px;
+    background: rgba(74,158,255,0.07);
+    border-bottom: 1px solid rgba(74,158,255,0.18);
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    gap: 8px;
+    flex-shrink: 0;
+    font-size: 11px;
+    color: #888;
+    user-select: none;
+}
+.pane-header span { color: #4a9eff; font-size: 12px; }
+
+/* ── ソースエディタ ── */
+#srcEditor {
+    flex: 1;
+    resize: none;
+    background: #0c0c1e;
+    color: #e0e0e0;
+    border: none;
+    padding: 12px 14px;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.6;
+    outline: none;
+    tab-size: 4;
+}
+#srcEditor::placeholder { color: #333; }
+
+/* ── 出力タブ ── */
+#outputTabs {
+    display: flex;
+    gap: 0;
+    flex-shrink: 0;
+    border-bottom: 1px solid rgba(74,158,255,0.18);
+    background: rgba(74,158,255,0.05);
+}
+.tab-btn {
+    padding: 5px 16px;
+    border: none;
+    background: transparent;
+    color: #555;
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s;
+}
+.tab-btn.active {
+    color: #4a9eff;
+    border-bottom-color: #4a9eff;
+    background: rgba(74,158,255,0.08);
+}
+.tab-btn:hover:not(.active) { color: #aaa; }
+
+/* ── アセンブリ出力 ── */
+#outputArea {
+    flex: 1;
+    overflow: auto;
+    padding: 12px 14px;
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    background: #0c0c1e;
+    white-space: pre;
+}
+.asm-comment { color: #555; }
+.asm-label   { color: #fdcb6e; font-weight: bold; }
+.asm-jump    { color: #ff6b9d; }
+.asm-load    { color: #74b9ff; }
+.asm-store   { color: #a29bfe; }
+.asm-alu     { color: #00ff88; }
+.asm-hlt     { color: #ff9f43; font-weight: bold; }
+.asm-error   { color: #ff6b9d; background: rgba(255,107,157,0.08); }
+.asm-addr    { color: #444; font-size: 11px; margin-right: 6px; user-select: none; }
+
+/* ── AST 出力 ── */
+#astOutput {
+    flex: 1;
+    overflow: auto;
+    padding: 12px 14px;
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.7;
+    background: #0c0c1e;
+    color: #aaa;
+    white-space: pre;
+    display: none;
+}
+.ast-ctor   { color: #74b9ff; }
+.ast-field  { color: #888; }
+.ast-str    { color: #fdcb6e; }
+.ast-num    { color: #00ff88; }
+
+/* ── ヘルプ ── */
+#helpBox {
+    position: fixed;
+    bottom: 10px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(10,15,30,0.95);
+    border: 1px solid rgba(74,158,255,0.3);
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-size: 11px;
+    color: #555;
+    pointer-events: none;
+    white-space: nowrap;
+}
+#helpBox kbd {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid #444;
+    border-radius: 3px;
+    padding: 1px 5px;
+    color: #aaa;
+}
+
+/* スクロールバー */
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:rgba(74,158,255,0.25); border-radius:3px; }
+</style>
+</head>
+<body>
+
+<!-- ヘッダーバー -->
+<div id="header">
+    <span class="title">Compiler <small>→ ComputerSystemHs ASM</small></span>
+    <select id="sampleSel" title="サンプルプログラムを選択">
+        <option value="">── サンプル ──</option>
+        <option value="hello">Hello (加算)</option>
+        <option value="countdown">カウントダウン</option>
+        <option value="ifelse">if-else</option>
+        <option value="factorial">階乗 (関数呼び出し)</option>
+        <option value="sample2">変数 + 比較</option>
+    </select>
+    <button class="hbtn" id="btnCompile">▶ コンパイル</button>
+    <button class="hbtn green" id="btnSend" disabled>→ CPUシミュレータへ送る</button>
+    <span class="spacer"></span>
+    <span id="status" class="info">compiler.wasm を読み込み中...</span>
+</div>
+
+<!-- 2ペインレイアウト -->
+<div id="content">
+    <!-- 左: ソースエディタ -->
+    <div class="pane" id="leftPane">
+        <div class="pane-header">
+            <span>ソースコード</span>
+            <span style="color:#555">(.lang — C 風言語)</span>
+        </div>
+        <textarea id="srcEditor" spellcheck="false"
+            placeholder="// ここにソースを入力してください&#10;int main() {&#10;    x = 42;&#10;    return x&#10;}"></textarea>
+    </div>
+
+    <!-- 右: 出力 -->
+    <div class="pane" id="rightPane">
+        <div id="outputTabs">
+            <button class="tab-btn active" id="tabAsm"  onclick="switchTab('asm')">アセンブリ</button>
+            <button class="tab-btn"        id="tabAst"  onclick="switchTab('ast')">AST (構文木)</button>
+        </div>
+        <pre id="outputArea">; コンパイルすると結果がここに表示されます</pre>
+        <pre id="astOutput"></pre>
+    </div>
+</div>
+
+<div id="helpBox">
+    <kbd>Ctrl+Enter</kbd> コンパイル &nbsp;|&nbsp;
+    <kbd>Ctrl+S</kbd> コンパイル &nbsp;|&nbsp;
+    ラベルにはバイトアドレスが表示されます
+</div>
+
+<script src="js/compiler-bridge.js"></script>
+<script>
+'use strict';
+
+// ── サンプルプログラム ──────────────────────────────
+const SAMPLES = {
+    hello: `// 加算サンプル
+int main() {
+    x = 10;
+    y = 32;
+    z = x + y;
+    return z
+}`,
+    countdown: `// カウントダウン (while ループ)
+int main() {
+    n = 10;
+    while (n > 0) {
+        n = n - 1
+    };
+    return n
+}`,
+    ifelse: `// if-else 分岐
+int main() {
+    x = 7;
+    if (x > 5) {
+        result = 1
+    } else {
+        result = 0
+    };
+    return result
+}`,
+    factorial: `// 階乗 (サブ関数 + CALL/RET)
+int factorial(int n) {
+    result = 1;
+    while (n > 1) {
+        result = result * n;
+        n = n - 1
+    };
+    return result
+}
+
+int main() {
+    y = factorial(5);
+    return y
+}`,
+    sample2: `// 変数と比較演算
+int main() {
+    x = 10;
+    y = 20;
+    ok = x > 5;
+    ng = y == 0;
+    return 0
+}`,
+};
+
+// ── 状態 ────────────────────────────────────────────
+let wasmReady   = false;
+let lastAsm     = '';
+let currentTab  = 'asm';
+
+// ── タブ切り替え ─────────────────────────────────────
+function switchTab(tab) {
+    currentTab = tab;
+    document.getElementById('tabAsm').classList.toggle('active', tab === 'asm');
+    document.getElementById('tabAst').classList.toggle('active', tab === 'ast');
+    document.getElementById('outputArea').style.display = tab === 'asm' ? 'block' : 'none';
+    document.getElementById('astOutput').style.display  = tab === 'ast' ? 'block' : 'none';
+}
+
+// ── アセンブリ シンタックスハイライト ───────────────
+function highlightAsm(asmText) {
+    const lines = asmText.split('\n');
+    let instrIdx = 0;
+    return lines.map(raw => {
+        const line = raw.trimEnd();
+        if (!line) return '';
+
+        // エラーコメント
+        if (line.startsWith('; ERROR')) {
+            return `<span class="asm-error">${esc(line)}</span>`;
+        }
+        // コメント
+        if (line.startsWith(';')) {
+            return `<span class="asm-comment">${esc(line)}</span>`;
+        }
+        // ラベル
+        if (line.endsWith(':')) {
+            return `<span class="asm-label">${esc(line)}</span>`;
+        }
+
+        // 命令: バイトアドレスを先頭に付与
+        const addr = (instrIdx * 2).toString(16).padStart(2, '0');
+        instrIdx++;
+        const addrSpan = `<span class="asm-addr">0x${addr}</span>`;
+
+        const mnemonic = line.split(/\s+/)[0].toUpperCase();
+        let cls = '';
+        if (['JMP','JZ','JNZ','CALL','RET'].includes(mnemonic))     cls = 'asm-jump';
+        else if (mnemonic.startsWith('LOAD'))                        cls = 'asm-load';
+        else if (mnemonic === 'STORE_A')                             cls = 'asm-store';
+        else if (['ADD','SUB','MUL','AND','OR','XOR','NOT','SHL','SHR'].includes(mnemonic)) cls = 'asm-alu';
+        else if (['HLT','NOP'].includes(mnemonic))                   cls = 'asm-hlt';
+
+        return `${addrSpan}<span class="${cls}">${esc(line)}</span>`;
+    }).join('\n');
+}
+
+// ── AST シンタックスハイライト ───────────────────────
+function highlightAst(astText) {
+    // Haskell Show 形式を簡易フォーマット&ハイライト
+    return formatAst(astText)
+        .replace(/([A-Z][A-Za-z0-9_]*)/g, '<span class="ast-ctor">$1</span>')
+        .replace(/"([^"\\]*)"/g, '<span class="ast-str">"$1"</span>')
+        .replace(/\b(\d+)\b/g, '<span class="ast-num">$1</span>');
+}
+
+function formatAst(s) {
+    let out = '', depth = 0;
+    const INDENT = '  ';
+    for (let i = 0; i < s.length; i++) {
+        const c = s[i];
+        if (c === '[' || c === '{') {
+            out += c + '\n' + INDENT.repeat(++depth);
+        } else if (c === ']' || c === '}') {
+            out += '\n' + INDENT.repeat(--depth) + c;
+        } else if (c === ',') {
+            out += ',\n' + INDENT.repeat(depth);
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}
+
+function esc(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── ステータス表示 ────────────────────────────────────
+function setStatus(msg, type) {
+    const el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = type || '';
+}
+
+// ── コンパイル実行 ────────────────────────────────────
+function doCompile() {
+    if (!wasmReady) { setStatus('WASM がまだ読み込まれていません', 'err'); return; }
+    const src = document.getElementById('srcEditor').value;
+    if (!src.trim()) { setStatus('ソースコードを入力してください', 'err'); return; }
+
+    const t0 = performance.now();
+    let asm, ast;
+    try {
+        asm = HaskellCompiler.compile(src);
+        ast = HaskellCompiler.parseAst(src);
+    } catch(e) {
+        setStatus('WASM エラー: ' + e.message, 'err');
+        return;
+    }
+    const dt = (performance.now() - t0).toFixed(1);
+
+    if (asm.startsWith('ERROR:')) {
+        document.getElementById('outputArea').innerHTML =
+            `<span class="asm-error">${esc(asm)}</span>`;
+        document.getElementById('astOutput').innerHTML = '';
+        setStatus('構文エラー', 'err');
+        document.getElementById('btnSend').disabled = true;
+        lastAsm = '';
+    } else {
+        const instrCount = asm.split('\n').filter(l => {
+            const t = l.trim();
+            return t && !t.startsWith(';') && !t.endsWith(':');
+        }).length;
+        document.getElementById('outputArea').innerHTML = highlightAsm(asm);
+        document.getElementById('astOutput').innerHTML  = highlightAst(ast);
+        setStatus(`コンパイル完了 — ${instrCount} 命令 (${dt} ms)`, 'ok');
+        document.getElementById('btnSend').disabled = false;
+        lastAsm = asm;
+    }
+}
+
+// ── CPUシミュレータへ送る ─────────────────────────────
+function doSendToCPU() {
+    if (!lastAsm) return;
+    if (window.opener && !window.opener.closed) {
+        // postMessage でシミュレータウィンドウへ送信
+        window.opener.postMessage({ type: 'loadAsm', code: lastAsm }, '*');
+        setStatus('シミュレータへ送信しました', 'ok');
+    } else {
+        // クリップボードにコピー
+        navigator.clipboard.writeText(lastAsm).then(() => {
+            setStatus('クリップボードにコピーしました (シミュレータで手動ロードしてください)', 'info');
+        }).catch(() => {
+            setStatus('シミュレータページからこのページを開いてください', 'err');
+        });
+    }
+}
+
+// ── サンプル選択 ─────────────────────────────────────
+document.getElementById('sampleSel').addEventListener('change', e => {
+    const key = e.target.value;
+    if (key && SAMPLES[key]) {
+        document.getElementById('srcEditor').value = SAMPLES[key];
+        e.target.value = '';
+    }
+});
+
+// ── ボタン ────────────────────────────────────────────
+document.getElementById('btnCompile').addEventListener('click', doCompile);
+document.getElementById('btnSend').addEventListener('click', doSendToCPU);
+
+// ── キーボードショートカット ─────────────────────────
+document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'Enter' || e.key === 's')) {
+        e.preventDefault();
+        doCompile();
+    }
+});
+
+// ── WASM 初期化 ──────────────────────────────────────
+(async () => {
+    try {
+        await HaskellCompiler.init('compiler.wasm');
+        wasmReady = true;
+        setStatus('compiler.wasm 読み込み完了', 'ok');
+        document.getElementById('btnCompile').disabled = false;
+        // デフォルトサンプルを表示
+        document.getElementById('srcEditor').value = SAMPLES.hello;
+    } catch(e) {
+        setStatus('WASM 読み込み失敗: ' + e.message, 'err');
+        document.getElementById('btnCompile').disabled = true;
+        document.getElementById('outputArea').textContent =
+            '; compiler.wasm が見つかりません。\n' +
+            '; 次のコマンドを実行してビルドしてください:\n' +
+            ';\n' +
+            ';   source ~/.ghc-wasm/env\n' +
+            ';   make wasm-compiler\n';
+    }
+})();
+</script>
+</body>
+</html>
