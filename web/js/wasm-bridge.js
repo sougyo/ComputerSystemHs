@@ -214,5 +214,10 @@ const HaskellCPU = (() => {
         inst.exports.free(ptr);
     }
 
-    return { init, getLayout, getState, getWires, step, reset, loadAsm };
+    // キーボード割り込みをCPUに送る (asciiCode: 0-255)
+    function setIRQ(asciiCode) {
+        inst.exports.hs_set_irq(asciiCode & 0xFF);
+    }
+
+    return { init, getLayout, getState, getWires, step, reset, loadAsm, setIRQ };
 })();

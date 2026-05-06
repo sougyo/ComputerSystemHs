@@ -25,6 +25,9 @@
         .mem-row { font-family: monospace; font-size: 10px; color: #aaa; }
         .mem-addr { color: #74b9ff; }
         .flag.active { color: #00cec9 !important; font-weight: bold; }
+        .irq-status { font-family: monospace; font-size: 11px; color: #636e72; margin-top: 4px; }
+        .irq-status.irq-enabled { color: #55efc4; }
+        .irq-status.irq-pending { color: #fd79a8 !important; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -57,6 +60,7 @@
                 <h3>Current Instruction</h3>
                 <div id="currentInstr" class="instr-display">---</div>
                 <div id="currentPhase" class="phase-display">IDLE</div>
+                <div id="irqStatus" class="irq-status">IRQ: IE=0 IP=0</div>
             </div>
             <div class="section">
                 <h3>Zoom</h3>
@@ -87,6 +91,7 @@
                 <option value="count">Count Up</option>
                 <option value="logic">Logic Ops</option>
                 <option value="fibonacci">Fibonacci</option>
+                <option value="keyboard">Keyboard IRQ</option>
                 <option value="custom">Custom</option>
             </select>
             <div id="programListing"></div>

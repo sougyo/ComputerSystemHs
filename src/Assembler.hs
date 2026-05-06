@@ -49,6 +49,9 @@ mnemonicToOpcode m = case m of
   "CALL"      -> 0x17
   "RET"       -> 0x18
   "JNS"       -> 0x19
+  "RTI"       -> 0x1A
+  "EI"        -> 0x1B
+  "DI"        -> 0x1C
   _           -> 0x00
 
 readNum :: String -> Word8

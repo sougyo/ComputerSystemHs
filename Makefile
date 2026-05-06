@@ -52,6 +52,7 @@ _wasm_build: $(SRCS)
 	  -optl-Wl,--export=hs_step \
 	  -optl-Wl,--export=hs_reset \
 	  -optl-Wl,--export=hs_load_asm \
+	  -optl-Wl,--export=hs_set_irq \
 	  -optl-Wl,--export=malloc \
 	  -optl-Wl,--export=free
 	@echo "✓ WASM build OK: $(WASM_OUT)"

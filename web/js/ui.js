@@ -12,6 +12,8 @@ const App = (() => {
     // row 0: 0xE0-0xE4 / row 1: 0xE5-0xE9 / row 2: 0xEA-0xEE
     // row 3: 0xEF-0xF3 / row 4: 0xF4-0xF8
     const DISPLAY_BASE = 0xE0;
+    const KB_DATA_ADDR = 0xDC;   // キーボードデータ MMIO
+    const IRQ_VEC_ADDR = 0xFE;   // 割り込みベクタ MMIO
 
     const PROGRAMS = {
         display: `; Display demo: draw a plus sign on the 5x5 screen
@@ -68,6 +70,18 @@ LOAD_B 0
 LOAD_A_MEM 0x81
 STORE_A 0x80
 HLT`,
+        keyboard: `; Keyboard IRQ demo
+; キーを押すと mem[0x80] にASCIIコードが格納されます
+; ハンドラは byte 0x0A (= 10) から始まります
+LOAD_A 10       ; 0x00: ハンドラアドレス = 10 (byte 0x0A)
+STORE_A 0xFE    ; 0x02: 割り込みベクタを設定
+EI              ; 0x04: 割り込み許可
+JMP 6           ; 0x06: メインループ (自己ジャンプで待機)
+NOP             ; 0x08: (padding)
+; -- IRQハンドラ (byte 0x0A から) --
+LOAD_A_MEM 0xDC ; 0x0A: キーコードを読み込む
+STORE_A 0x80    ; 0x0C: mem[0x80] に保存
+RTI             ; 0x0E: 割り込みから復帰 (IEを再有効化)`,
     };
 
     // ── 初期化 ───────────────���─────────────────
@@ -173,6 +187,15 @@ HLT`,
         v('currentInstr', state.instrName || '---');
         v('currentPhase', state.halted ? 'HALTED' : 'READY');
 
+        // IRQ ステータス
+        const irqEl = document.getElementById('irqStatus');
+        if (irqEl) {
+            const ie = !!state.irqEnabled;
+            const ip = !!state.irqPending;
+            irqEl.textContent = 'IRQ: IE=' + (ie?'1':'0') + ' IP=' + (ip?'1':'0');
+            irqEl.className = 'irq-status' + (ip ? ' irq-pending' : '') + (ie ? ' irq-enabled' : '');
+        }
+
         // ステップボタンを非活性化
         const btnStep = document.getElementById('btnStep');
         const btnRun  = document.getElementById('btnRun');
@@ -193,6 +216,14 @@ HLT`,
                 (b||0).toString(16).padStart(2,'0')).join(' ');
             rows.push(`<div class="mem-row"><span class="mem-addr">${addr}</span> <span class="mem-bytes">${bytes}</span></div>`);
         }
+        // キーボード / IRQ MMIO 領域
+        const kbCode = mem[KB_DATA_ADDR] || 0;
+        const kbChar = (kbCode >= 0x20 && kbCode < 0x7F) ? String.fromCharCode(kbCode) : '?';
+        const vecVal = mem[IRQ_VEC_ADDR] || 0;
+        rows.push(`<div class="mem-row" style="margin-top:6px;opacity:0.6"><span class="mem-addr" style="color:#74b9ff">KB MMIO</span></div>`);
+        rows.push(`<div class="mem-row"><span class="mem-addr" style="color:#74b9ff">0xDC</span> <span class="mem-bytes" style="color:#74b9ff">KB=${(kbCode).toString(16).padStart(2,'0')} '${kbChar}'</span></div>`);
+        rows.push(`<div class="mem-row"><span class="mem-addr" style="color:#74b9ff">0xFE</span> <span class="mem-bytes" style="color:#74b9ff">VEC=0x${vecVal.toString(16).padStart(2,'0')}</span></div>`);
+
         // ディスプレイ MMIO 領域 (0xE0-0xF8) を別セクションで表示
         rows.push(`<div class="mem-row" style="margin-top:6px;opacity:0.6"><span class="mem-addr" style="color:#fdcb6e">DISP MMIO</span></div>`);
         for (let r = 0; r < 5; r++) {
@@ -267,9 +298,15 @@ HLT`,
 
         document.addEventListener('keydown', e => {
             if (e.target.tagName === 'TEXTAREA') return;
-            if (e.code === 'Space') { e.preventDefault(); step(); }
-            if (e.code === 'KeyR') { e.preventDefault(); document.getElementById('btnRun')?.click(); }
-            if (e.code === 'KeyP') { e.preventDefault(); stopRunning(); }
+            // UI ホットキー
+            if (e.code === 'Space') { e.preventDefault(); step(); return; }
+            if (e.code === 'KeyR' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); document.getElementById('btnRun')?.click(); return; }
+            if (e.code === 'KeyP') { e.preventDefault(); stopRunning(); return; }
+            // 印字可能なキーを IRQ として CPU に送る
+            if (e.key.length === 1) {
+                const ascii = e.key.charCodeAt(0);
+                try { HaskellCPU.setIRQ(ascii); } catch (_) {}
+            }
         });
     }
 

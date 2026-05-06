@@ -6,6 +6,8 @@ module CPU.Types
   , initialCPUState
   , displayBase
   , displaySize
+  , kbDataAddr
+  , irqVectorAddr
   ) where
 
 import Data.Word (Word8)
@@ -33,6 +35,13 @@ displayBase = 0xE0   -- 先頭アドレス (pixel(0,0))
 
 displaySize :: Int
 displaySize = 25     -- 5×5 = 25 ピクセル
+
+-- キーボード / 割り込み MMIO 定数
+kbDataAddr :: Int
+kbDataAddr = 0xDC    -- 最後に押されたキーの ASCII コード
+
+irqVectorAddr :: Int
+irqVectorAddr = 0xFE -- 割り込みハンドラの開始アドレス (1 バイト)
 
 data CPURefs = CPURefs
   { crRegAIns    :: ![Int]
@@ -65,32 +74,36 @@ data CPURefs = CPURefs
 type Mem = Array Int Word8
 
 data CPUState = CPUState
-  { csRegA      :: !Word8
-  , csRegB      :: !Word8
-  , csPC        :: !Word8
-  , csSP        :: !Word8
-  , csIROpcode  :: !Word8
-  , csIROperand :: !Word8
-  , csFlagZ     :: !Bool
-  , csFlagC     :: !Bool
-  , csFlagN     :: !Bool
-  , csHalted    :: !Bool
-  , csMemory    :: !Mem
-  , csWires     :: !WireVals
+  { csRegA       :: !Word8
+  , csRegB       :: !Word8
+  , csPC         :: !Word8
+  , csSP         :: !Word8
+  , csIROpcode   :: !Word8
+  , csIROperand  :: !Word8
+  , csFlagZ      :: !Bool
+  , csFlagC      :: !Bool
+  , csFlagN      :: !Bool
+  , csHalted     :: !Bool
+  , csMemory     :: !Mem
+  , csWires      :: !WireVals
+  , csIRQPending :: !Bool
+  , csIRQEnabled :: !Bool
   } deriving Show
 
 initialCPUState :: CPURefs -> CPUState
 initialCPUState _refs = CPUState
-  { csRegA      = 0
-  , csRegB      = 0
-  , csPC        = 0
-  , csSP        = 0x7F
-  , csIROpcode  = 0
-  , csIROperand = 0
-  , csFlagZ     = False
-  , csFlagC     = False
-  , csFlagN     = False
-  , csHalted    = False
-  , csMemory    = listArray (0, 255) (repeat 0)
-  , csWires     = mempty
+  { csRegA       = 0
+  , csRegB       = 0
+  , csPC         = 0
+  , csSP         = 0x7F
+  , csIROpcode   = 0
+  , csIROperand  = 0
+  , csFlagZ      = False
+  , csFlagC      = False
+  , csFlagN      = False
+  , csHalted     = False
+  , csMemory     = listArray (0, 255) (repeat 0)
+  , csWires      = mempty
+  , csIRQPending = False
+  , csIRQEnabled = False
   }

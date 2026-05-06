@@ -9,7 +9,7 @@ import qualified Data.IntMap.Strict as IM
 import Data.List (foldl')
 
 import Circuit
-import CPU.Types (CPURefs(..), CPUState(..), initialCPUState, displayBase)
+import CPU.Types (CPURefs(..), CPUState(..), initialCPUState, displayBase, irqVectorAddr)
 
 -- ──────────────────────────────────────────────
 -- ワイヤ操作ヘルパー
@@ -48,12 +48,28 @@ setALUControl refs opcode vs =
     aluCtrl _    = (False, False, False)
 
 -- ──────────────────────────────────────────────
+-- 割り込み発火 (IRQ pending && enabled)
+-- ──────────────────────────────────────────────
+fireIRQ :: CPUState -> CPUState
+fireIRQ st =
+  let sp'    = csSP st - 1
+      vec    = fromIntegral (csMemory st ! irqVectorAddr)
+      newMem = csMemory st // [(fromIntegral sp', csPC st)]
+  in st { csSP         = sp'
+        , csPC         = vec
+        , csMemory     = newMem
+        , csIRQPending = False
+        , csIRQEnabled = False
+        }
+
+-- ──────────────────────────────────────────────
 -- CPUの1ステップ (純粋関数)
 -- ──────────────────────────────────────────────
 stepCPU :: [Gate] -> CPURefs -> CPUState -> CPUState
 stepCPU gates refs st
-  | csHalted st = st
-  | otherwise   = st'
+  | csHalted st                          = st
+  | csIRQPending st && csIRQEnabled st   = fireIRQ st
+  | otherwise                            = st''
   where
     mem    = csMemory st
     pc     = fromIntegral (csPC st) :: Int
@@ -116,6 +132,13 @@ stepCPU gates refs st
       , csWires     = vs4
       }
 
+    -- RTI/EI/DI: 割り込み有効フラグを更新
+    st'' = case opcode of
+      0x1A -> st' { csIRQEnabled = True  }  -- RTI: re-enable interrupts
+      0x1B -> st' { csIRQEnabled = True  }  -- EI
+      0x1C -> st' { csIRQEnabled = False }  -- DI
+      _    -> st'
+
 -- 命令実行の純粋部分
 execInstr :: Word8 -> Word8
           -> Word8 -> Word8 -> Word8
@@ -174,6 +197,11 @@ execInstr op opr regA regB sp pc mem aluRes aluCout =
     0x19 -> let flagN = (regA .&. 0x80) /= 0         -- JNS: N=0 なら JMP addr
                 t = if not flagN then fromIntegral opr else nextPC
             in (regA, regB, sp, t, mem, False, False)
+    0x1A -> let sp' = sp + 1                         -- RTI: pop PC (IRQ re-enable in stepCPU)
+                pc' = fromIntegral (mem ! fromIntegral sp')
+            in (regA, regB, sp', pc', mem, False, False)
+    0x1B -> (regA, regB, sp, nextPC, mem, False, False) -- EI: enable irq (handled in stepCPU)
+    0x1C -> (regA, regB, sp, nextPC, mem, False, False) -- DI: disable irq (handled in stepCPU)
     _    -> (regA, regB, sp, nextPC, mem, False, False)
 
 -- ──────────────────────────────────────────────

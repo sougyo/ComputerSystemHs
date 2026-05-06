@@ -35,9 +35,11 @@ cpuStateJSON st = renderJSON $ jObj
   , ("flagZ",     jBool (csFlagZ st))
   , ("flagC",     jBool (csFlagC st))
   , ("flagN",     jBool (csFlagN st))
-  , ("halted",    jBool (csHalted st))
-  , ("instrName", jStr (opcodeToName (csIROpcode st)))
-  , ("memory",    jArr (map (JInt . fromIntegral) (elems (csMemory st))))
+  , ("halted",     jBool (csHalted st))
+  , ("instrName",  jStr (opcodeToName (csIROpcode st)))
+  , ("irqPending", jBool (csIRQPending st))
+  , ("irqEnabled", jBool (csIRQEnabled st))
+  , ("memory",     jArr (map (JInt . fromIntegral) (elems (csMemory st))))
   ]
 
 hex8 :: Word8 -> String
@@ -52,7 +54,8 @@ opcodeToName op = case op of
   0x0C->"JZ";        0x0D->"JNZ";  0x0E->"SHL";  0x0F->"HLT"
   0x10->"LOAD_B_MEM"; 0x11->"MOV_B_A"; 0x12->"MUL"; 0x13->"SHR"
   0x14->"CMP"; 0x15->"PUSH"; 0x16->"POP"; 0x17->"CALL"
-  0x18->"RET"; 0x19->"JNS"; _->"???"
+  0x18->"RET"; 0x19->"JNS"; 0x1A->"RTI"; 0x1B->"EI"; 0x1C->"DI"
+  _->"???"
 
 -- ──────────────────────────────────────────────
 -- ワイヤ値 (wireId, value) のフラット配列

@@ -5,13 +5,15 @@
 module Main where
 
 import Data.IORef
+import Data.Array ((//))
+import Data.Word (Word32)
 import System.IO.Unsafe (unsafePerformIO)
 import Foreign.C.String (CString, newCString, peekCString)
 
 import Circuit (Gate)
 import Builder (topoSort)
 import CPU.Components (buildCPU, CPUBuildResult(..))
-import CPU.Types (CPUState(..), CPURefs(..), initialCPUState)
+import CPU.Types (CPUState(..), CPURefs(..), initialCPUState, kbDataAddr)
 import CPU.Step (stepCPU, resetCPU, loadProgram)
 import Assembler (assemble)
 import Serialize (cpuStateJSON, layoutJSON, wireValsJSON)
@@ -56,6 +58,13 @@ hsLoadAsm cstr = do
   src <- peekCString cstr
   let instrs = assemble src
   modifyIORef' globalState (loadProgram instrs theRefs)
+
+-- キーボード割り込み: キーの ASCII コードを mem[kbDataAddr] に書き込み IRQ を発火
+foreign export ccall "hs_set_irq" hsSetIRQ :: Word32 -> IO ()
+hsSetIRQ keyCode = modifyIORef' globalState $ \st -> st
+  { csIRQPending = True
+  , csMemory     = csMemory st // [(kbDataAddr, fromIntegral keyCode)]
+  }
 
 -- -no-hs-main 使用時も GHC は Main モジュールの main を要求する
 main :: IO ()
