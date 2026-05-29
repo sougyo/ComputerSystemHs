@@ -246,9 +246,50 @@ RTI             ; 0x0E: 割り込みから復帰 (IEを再有効化)`,
 
     function stopRunning() {
         running = false;
-        if (runTimer) { clearInterval(runTimer); runTimer = null; }
+        if (runTimer) { clearInterval(runTimer); clearTimeout(runTimer); runTimer = null; }
         document.getElementById('btnRun')?.setAttribute('disabled', false);
         document.getElementById('btnPause')?.setAttribute('disabled', true);
+        // 最高速モードで止めていた描画ループを復帰させ、最新状態を反映する
+        if (renderer && !renderer._rafId) {
+            try { renderer.updateWires(HaskellCPU.getWires()); } catch (e) {}
+            renderer.startRenderLoop();
+        }
+        updateUI();
+    }
+
+    // 通常モード: speedSlider に応じた間隔で1ステップずつ実行
+    function startNormalRun() {
+        const speed = parseInt(document.getElementById('speedSlider')?.value || 5);
+        const delay = Math.max(50, 1100 - speed * 100);
+        runTimer = setInterval(() => {
+            let state = {};
+            try { state = HaskellCPU.getState(); } catch (e) {}
+            if (state.halted || !running) { stopRunning(); return; }
+            step();
+        }, delay);
+    }
+
+    // 最高速モード: 描画/UI更新を行わず、16ms ごとに大量の step を回す
+    function startMaxSpeedRun() {
+        if (renderer) renderer.stopRenderLoop();
+        const BATCH = 2000;
+        const tick = () => {
+            if (!running) return;
+            const start = performance.now();
+            let halted = false;
+            while (performance.now() - start < 16) {
+                for (let i = 0; i < BATCH; i++) {
+                    try { HaskellCPU.step(); }
+                    catch (e) { halted = true; break; }
+                }
+                if (halted) break;
+                try { if (HaskellCPU.getState().halted) { halted = true; break; } }
+                catch (e) { halted = true; break; }
+            }
+            if (halted) { stopRunning(); return; }
+            runTimer = setTimeout(tick, 0);
+        };
+        tick();
     }
 
     // ── パネル ドラッグ移動 ─────────────────────
@@ -318,14 +359,8 @@ RTI             ; 0x0E: 割り込みから復帰 (IEを再有効化)`,
             running = true;
             document.getElementById('btnPause').disabled = false;
             document.getElementById('btnRun').disabled   = true;
-            const speed = parseInt(document.getElementById('speedSlider')?.value || 5);
-            const delay = Math.max(50, 1100 - speed * 100);
-            runTimer = setInterval(() => {
-                let state = {};
-                try { state = HaskellCPU.getState(); } catch (e) {}
-                if (state.halted || !running) { stopRunning(); updateUI(); return; }
-                step();
-            }, delay);
+            if (document.getElementById('maxSpeed')?.checked) startMaxSpeedRun();
+            else                                              startNormalRun();
         });
 
         document.getElementById('btnPause')?.addEventListener('click', stopRunning);
@@ -353,6 +388,17 @@ RTI             ; 0x0E: 割り込みから復帰 (IEを再有効化)`,
 
         document.getElementById('speedSlider')?.addEventListener('input', e => {
             document.getElementById('speedLabel').textContent = e.target.value;
+            if (running && !document.getElementById('maxSpeed')?.checked) {
+                stopRunning();
+                document.getElementById('btnRun').click();
+            }
+        });
+
+        // 最高速モード切り替え: スライダーを無効化し、実行中なら新モードで再開
+        document.getElementById('maxSpeed')?.addEventListener('change', e => {
+            const on = !!e.target.checked;
+            const slider = document.getElementById('speedSlider');
+            if (slider) slider.disabled = on;
             if (running) {
                 stopRunning();
                 document.getElementById('btnRun').click();
