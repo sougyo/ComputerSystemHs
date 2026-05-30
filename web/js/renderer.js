@@ -69,7 +69,43 @@ class Renderer {
     }
 
     stopRenderLoop() {
-        if (this._rafId) cancelAnimationFrame(this._rafId);
+        if (this._rafId) { cancelAnimationFrame(this._rafId); this._rafId = null; }
+    }
+
+    // 最高速モード用: 回路は描画せず DISPLAY コンポーネントだけ描く
+    renderDisplayOnly() {
+        const ctx = this.ctx;
+        const W   = this.canvas.width;
+        const H   = this.canvas.height;
+        ctx.fillStyle = '#0a0a0a';
+        ctx.fillRect(0, 0, W, H);
+        if (!this.layout) return;
+        ctx.save();
+        ctx.translate(-this.camX * this.zoom + W / 2, -this.camY * this.zoom + H / 2);
+        ctx.scale(this.zoom, this.zoom);
+        this._drawDisplaysOnly(ctx, this.layout, 0, 0);
+        ctx.restore();
+    }
+
+    _drawDisplaysOnly(ctx, comp, absX, absY) {
+        const cx = absX + comp.x;
+        const cy = absY + comp.y;
+        if (comp.type === 'DISPLAY') {
+            this._drawDisplay(ctx, comp, cx, cy, this.zoom);
+            return;
+        }
+        for (const child of (comp.children || [])) {
+            this._drawDisplaysOnly(ctx, child, cx, cy);
+        }
+    }
+
+    startDisplayOnlyLoop(onTick) {
+        const loop = () => {
+            if (onTick) { try { onTick(); } catch (e) {} }
+            this.renderDisplayOnly();
+            this._rafId = requestAnimationFrame(loop);
+        };
+        loop();
     }
 
     fitView() {

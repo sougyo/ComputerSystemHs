@@ -154,6 +154,23 @@ body {
 #speedSlider { width: 80px; }
 #speedLabel { color: #00ff88; width: 16px; }
 
+.bank-btn {
+    background: rgba(74, 158, 255, 0.08);
+    border: 1px solid rgba(74, 158, 255, 0.3);
+    color: #888;
+    padding: 2px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+}
+.bank-btn:hover { color: #4a9eff; }
+.bank-btn-active {
+    background: rgba(0, 255, 136, 0.15);
+    border-color: rgba(0, 255, 136, 0.5);
+    color: #00ff88;
+}
+
 /* 右サイドバー: プログラム */
 #programPanel {
     top: 10px; right: 10px;

@@ -96,6 +96,7 @@
                 <option value="logic">Logic Ops</option>
                 <option value="fibonacci">Fibonacci</option>
                 <option value="keyboard">Keyboard IRQ</option>
+                <option value="life">Life (Conway)</option>
                 <option value="custom">Custom</option>
             </select>
             <div id="programListing"></div>
@@ -109,6 +110,11 @@
     <div id="memoryPanel" class="panel">
         <h2>Memory <small style="color:#555;font-size:10px;font-weight:normal">Ctrl+ホイール でズーム</small></h2>
         <div class="panel-body">
+            <div id="memBankBar" style="display:flex;gap:6px;align-items:center;margin-bottom:4px;font-size:11px;color:#888">
+                <span>View:</span>
+                <button id="bankBtn0" class="bank-btn bank-btn-active" data-bank="0">Low 0x000-0x0FF</button>
+                <button id="bankBtn1" class="bank-btn" data-bank="1">High 0x100-0x1FF</button>
+            </div>
             <div id="memLegend">
                 <span style="color:#ff6b9d">■ PC</span>
                 <span style="color:#fdcb6e">■ SP</span>

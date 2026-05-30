@@ -9,7 +9,7 @@ import qualified Data.IntMap.Strict as IM
 import Data.List (foldl')
 
 import Circuit
-import CPU.Types (CPURefs(..), CPUState(..), initialCPUState, displayBase, irqVectorAddr)
+import CPU.Types (CPURefs(..), CPUState(..), initialCPUState, displayBase, irqVectorAddr, memTotal)
 
 -- ──────────────────────────────────────────────
 -- ワイヤ操作ヘルパー
@@ -132,11 +132,11 @@ stepCPU gates refs st
       , csWires     = vs4
       }
 
-    -- RTI/EI/DI: 割り込み有効フラグを更新
+    -- RTI/EI/DI: 制御フラグ更新
     st'' = case opcode of
-      0x1A -> st' { csIRQEnabled = True  }  -- RTI: re-enable interrupts
-      0x1B -> st' { csIRQEnabled = True  }  -- EI
-      0x1C -> st' { csIRQEnabled = False }  -- DI
+      0x1A -> st' { csIRQEnabled = True  }              -- RTI: re-enable interrupts
+      0x1B -> st' { csIRQEnabled = True  }              -- EI
+      0x1C -> st' { csIRQEnabled = False }              -- DI
       _    -> st'
 
 -- 命令実行の純粋部分
@@ -147,14 +147,16 @@ execInstr :: Word8 -> Word8
           -> Word8 -> Bool
           -> (Word8, Word8, Word8, Int, Array Int Word8, Bool, Bool)
 execInstr op opr regA regB sp pc mem aluRes aluCout =
-  let nextPC = pc + 2
+  let nextPC  = pc + 2
+      addrLo  = fromIntegral opr           -- bank 0 (0x000..0x0FF)
+      addrHi  = 0x100 + fromIntegral opr   -- bank 1 (0x100..0x1FF)
   in case op of
     0x00 -> (regA, regB, sp, nextPC, mem, False, False)
     0x01 -> (opr,  regB, sp, nextPC, mem, False, True)
     0x02 -> (regA, opr,  sp, nextPC, mem, False, False)
-    0x03 -> let a = mem ! fromIntegral opr
+    0x03 -> let a = mem ! addrLo
             in (a, regB, sp, nextPC, mem, False, True)
-    0x04 -> let m = mem // [(fromIntegral opr, regA)]
+    0x04 -> let m = mem // [(addrLo, regA)]
             in (regA, regB, sp, nextPC, m, False, False)
     0x05 -> (aluRes, regB, sp, nextPC, mem, aluCout, True)
     0x06 -> (aluRes, regB, sp, nextPC, mem, not aluCout, True)
@@ -172,7 +174,7 @@ execInstr op opr regA regB sp pc mem aluRes aluCout =
                 r = (regA `shiftL` 1) .&. 0xFF
             in (r, regB, sp, nextPC, mem, c, True)
     -- 新命令 (0x10〜0x19)
-    0x10 -> let a = mem ! fromIntegral opr          -- LOAD_B_MEM: B ← mem[addr]
+    0x10 -> let a = mem ! addrLo                     -- LOAD_B_MEM: B ← mem[addr]
             in (regA, a, sp, nextPC, mem, False, False)
     0x11 -> (regA, regA, sp, nextPC, mem, False, False) -- MOV_B_A: B ← A
     0x12 -> let r = (fromIntegral regA * fromIntegral regB) .&. (0xFF :: Int) -- MUL
@@ -185,23 +187,29 @@ execInstr op opr regA regB sp pc mem aluRes aluCout =
     0x15 -> let sp' = sp - 1                         -- PUSH: mem[sp-1] ← A; SP ← SP-1
                 m   = mem // [(fromIntegral sp', regA)]
             in (regA, regB, sp', nextPC, m, False, False)
-    0x16 -> let sp' = sp + 1                         -- POP: SP ← SP+1; A ← mem[SP]
-                a   = mem ! fromIntegral sp'
+    0x16 -> let a   = mem ! fromIntegral sp           -- POP: A ← mem[SP]; SP ← SP+1
+                sp' = sp + 1
             in (a, regB, sp', nextPC, mem, False, True)
     0x17 -> let sp' = sp - 1                         -- CALL: push(PC+2); JMP addr
                 m   = mem // [(fromIntegral sp', fromIntegral nextPC)]
             in (regA, regB, sp', fromIntegral opr, m, False, False)
-    0x18 -> let sp' = sp + 1                         -- RET: PC ← mem[SP+1]
-                pc' = fromIntegral (mem ! fromIntegral sp')
+    0x18 -> let pc' = fromIntegral (mem ! fromIntegral sp)   -- RET: PC ← mem[SP]; SP ← SP+1
+                sp' = sp + 1
             in (regA, regB, sp', pc', mem, False, False)
     0x19 -> let flagN = (regA .&. 0x80) /= 0         -- JNS: N=0 なら JMP addr
                 t = if not flagN then fromIntegral opr else nextPC
             in (regA, regB, sp, t, mem, False, False)
-    0x1A -> let sp' = sp + 1                         -- RTI: pop PC (IRQ re-enable in stepCPU)
-                pc' = fromIntegral (mem ! fromIntegral sp')
+    0x1A -> let pc' = fromIntegral (mem ! fromIntegral sp)   -- RTI: PC ← mem[SP]; SP ← SP+1
+                sp' = sp + 1
             in (regA, regB, sp', pc', mem, False, False)
     0x1B -> (regA, regB, sp, nextPC, mem, False, False) -- EI: enable irq (handled in stepCPU)
     0x1C -> (regA, regB, sp, nextPC, mem, False, False) -- DI: disable irq (handled in stepCPU)
+    0x1D -> let a = mem ! addrHi                       -- LOAD_A_HIGH: A ← mem[0x100+addr]
+            in (a, regB, sp, nextPC, mem, False, True)
+    0x1E -> let m = mem // [(addrHi, regA)]            -- STORE_A_HIGH: mem[0x100+addr] ← A
+            in (regA, regB, sp, nextPC, m, False, False)
+    0x1F -> let a = mem ! addrHi                       -- LOAD_B_HIGH: B ← mem[0x100+addr]
+            in (regA, a, sp, nextPC, mem, False, False)
     _    -> (regA, regB, sp, nextPC, mem, False, False)
 
 -- ──────────────────────────────────────────────
@@ -212,5 +220,5 @@ loadProgram :: [(Word8, Word8)] -> CPURefs -> CPUState -> CPUState
 loadProgram instrs refs st =
   let updates = concatMap (\(i, (op, arg)) -> [(i*2, op), (i*2+1, arg)])
                   (zip [0..127] instrs)
-      newMem  = listArray (0,255) (repeat 0) // updates
+      newMem  = listArray (0, memTotal - 1) (repeat 0) // updates
   in (resetCPU refs st) { csMemory = newMem }

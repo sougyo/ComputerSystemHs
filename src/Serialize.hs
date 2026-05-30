@@ -55,6 +55,7 @@ opcodeToName op = case op of
   0x10->"LOAD_B_MEM"; 0x11->"MOV_B_A"; 0x12->"MUL"; 0x13->"SHR"
   0x14->"CMP"; 0x15->"PUSH"; 0x16->"POP"; 0x17->"CALL"
   0x18->"RET"; 0x19->"JNS"; 0x1A->"RTI"; 0x1B->"EI"; 0x1C->"DI"
+  0x1D->"LOAD_A_HIGH"; 0x1E->"STORE_A_HIGH"; 0x1F->"LOAD_B_HIGH"
   _->"???"
 
 -- ──────────────────────────────────────────────

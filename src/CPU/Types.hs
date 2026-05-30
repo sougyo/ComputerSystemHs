@@ -8,6 +8,7 @@ module CPU.Types
   , displaySize
   , kbDataAddr
   , irqVectorAddr
+  , memTotal
   ) where
 
 import Data.Word (Word8)
@@ -70,7 +71,13 @@ data CPURefs = CPURefs
   , crDisplayPixels :: ![Int]   -- 25本のピクセルワイヤ (アドレス 0xE0..0xF8 に対応)
   } deriving Show
 
--- メモリ: 256バイトの配列
+-- メモリ: 512バイト (2バンク × 256バイト)
+-- LOAD_A_MEM / STORE_A の operand は 8bit のため、上位 9bit 目は csBank で決まる。
+-- bank=0 (低位 256B): コード、スタック、display、MMIO
+-- bank=1 (高位 256B): プログラム任意のデータ領域
+memTotal :: Int
+memTotal = 512
+
 type Mem = Array Int Word8
 
 data CPUState = CPUState
@@ -95,14 +102,17 @@ initialCPUState _refs = CPUState
   { csRegA       = 0
   , csRegB       = 0
   , csPC         = 0
-  , csSP         = 0x7F
+  -- スタックは display (0xE0..0xF8) と IRQ ベクタ (0xFE) を避けて
+  -- mem[0xFC] から下方向に伸ばす。csMemory の上位バンク (0x100..) は
+  -- stack インデックス (Word8) からは届かないため、 stack は常に bank 0。
+  , csSP         = 0xFD
   , csIROpcode   = 0
   , csIROperand  = 0
   , csFlagZ      = False
   , csFlagC      = False
   , csFlagN      = False
   , csHalted     = False
-  , csMemory     = listArray (0, 255) (repeat 0)
+  , csMemory     = listArray (0, memTotal - 1) (repeat 0)
   , csWires      = mempty
   , csIRQPending = False
   , csIRQEnabled = False

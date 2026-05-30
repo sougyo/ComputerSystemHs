@@ -52,6 +52,9 @@ mnemonicToOpcode m = case m of
   "RTI"       -> 0x1A
   "EI"        -> 0x1B
   "DI"        -> 0x1C
+  "LOAD_A_HIGH"  -> 0x1D
+  "STORE_A_HIGH" -> 0x1E
+  "LOAD_B_HIGH"  -> 0x1F
   _           -> 0x00
 
 readNum :: String -> Word8
